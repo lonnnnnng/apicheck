@@ -1,0 +1,14 @@
+# macOS 本地元数据
+.DS_Store
+
+# 作者 long: 这些是本地测试和桌面打包产物，仓库只保留可复现构建的源码和脚本。
+/.playwright-cli/
+/build/
+/apicheck
+/apicheck-desktop
+
+# 通用日志与临时文件
+*.log
+*.tmp
+*.swp
+
