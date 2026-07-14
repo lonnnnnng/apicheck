@@ -21,13 +21,17 @@ func main() {
 	var serve bool
 	var listen string
 	var staticDir string
+	var streamMaxDuration string
 	flag.StringVar(&cfg.BaseURL, "base-url", "", "API root URL, for example https://example.com/v1")
 	flag.StringVar(&cfg.APIKey, "api-key", "", "API key, can also be provided by APICHECK_API_KEY")
 	flag.Var((*protocolFlag)(&cfg.Protocol), "protocol", "auto/openai/openai-chat/openai-responses/anthropic/anthropic-messages/all")
 	flag.Var((*modeFlag)(&cfg.Mode), "mode", "both/nonstream/stream")
 	flag.IntVar(&cfg.Concurrency, "concurrency", 2, "model probe concurrency")
 	flag.DurationVar(&cfg.Timeout, "timeout", 60*time.Second, "single request timeout")
-	flag.DurationVar(&cfg.ConnectTimeout, "connect-timeout", 10*time.Second, "TCP/TLS connect timeout")
+	flag.DurationVar(&cfg.ConnectTimeout, "connect-timeout", 30*time.Second, "TCP/TLS connect timeout")
+	flag.DurationVar(&cfg.StreamFirstTimeout, "stream-first-timeout", 60*time.Second, "stream first packet timeout")
+	flag.DurationVar(&cfg.StreamIdleTimeout, "stream-idle-timeout", 60*time.Second, "stream idle timeout")
+	flag.StringVar(&streamMaxDuration, "stream-max-duration", "10m", "stream max duration, 0 means unlimited")
 	flag.StringVar(&cfg.Prompt, "prompt", "", "conversation probe prompt")
 	flag.StringVar(&cfg.Filter, "filter", "", "only test models containing this text")
 	flag.IntVar(&cfg.MaxModels, "max-models", 0, "max models per discovered source, 0 means unlimited")
@@ -40,6 +44,7 @@ func main() {
 	flag.StringVar(&listen, "listen", "127.0.0.1:8787", "web UI listen address")
 	flag.StringVar(&staticDir, "static-dir", "prototype", "directory that contains index.html")
 	flag.Parse()
+	cfg.StreamMaxDuration, cfg.DisableStreamMax = parseStreamMaxDuration(streamMaxDuration, 10*time.Minute)
 
 	if serve {
 		if err := runServer(listen, staticDir); err != nil {
@@ -86,6 +91,9 @@ type checkRequest struct {
 	Mode               string             `json:"mode"`
 	Concurrency        int                `json:"concurrency"`
 	Timeout            string             `json:"timeout"`
+	StreamFirstTimeout string             `json:"stream_first_timeout"`
+	StreamIdleTimeout  string             `json:"stream_idle_timeout"`
+	StreamMaxDuration  string             `json:"stream_max_duration"`
 	Filter             string             `json:"filter"`
 	MaxModels          int                `json:"max_models"`
 	SkipTLSVerify      bool               `json:"skip_tls_verify"`
@@ -140,18 +148,9 @@ func newServerHandler(staticDir string) http.Handler {
 }
 
 func configFromRequest(req checkRequest) checker.Config {
-	timeout := 60 * time.Second
-	if req.Timeout != "" {
-		if parsed, err := time.ParseDuration(req.Timeout); err == nil {
-			timeout = parsed
-		}
-	}
-	connectTimeout := 10 * time.Second
-	if req.ConnectTimeout != "" {
-		if parsed, err := time.ParseDuration(req.ConnectTimeout); err == nil {
-			connectTimeout = parsed
-		}
-	}
+	timeout := parseDurationOrDefault(req.Timeout, 60*time.Second)
+	connectTimeout := parseDurationOrDefault(req.ConnectTimeout, 30*time.Second)
+	streamMaxDuration, disableStreamMax := parseStreamMaxDuration(req.StreamMaxDuration, 10*time.Minute)
 	return checker.Config{
 		BaseURL:                req.BaseURL,
 		APIKey:                 req.APIKey,
@@ -161,6 +160,10 @@ func configFromRequest(req checkRequest) checker.Config {
 		Concurrency:            req.Concurrency,
 		Timeout:                timeout,
 		ConnectTimeout:         connectTimeout,
+		StreamFirstTimeout:     parseDurationOrDefault(req.StreamFirstTimeout, 60*time.Second),
+		StreamIdleTimeout:      parseDurationOrDefault(req.StreamIdleTimeout, 60*time.Second),
+		StreamMaxDuration:      streamMaxDuration,
+		DisableStreamMax:       disableStreamMax,
 		Filter:                 req.Filter,
 		MaxModels:              req.MaxModels,
 		InsecureSkipVerify:     req.SkipTLSVerify,
@@ -248,6 +251,33 @@ func parseClientSurfaceOrDefault(value string, fallback checker.ClientSurface) c
 	default:
 		return fallback
 	}
+}
+
+func parseDurationOrDefault(value string, fallback time.Duration) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func parseStreamMaxDuration(value string, fallback time.Duration) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback, false
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fallback, false
+	}
+	if parsed == 0 {
+		return 0, true
+	}
+	return parsed, false
 }
 
 func renderTable(report *checker.Report) string {

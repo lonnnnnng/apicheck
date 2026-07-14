@@ -190,6 +190,135 @@ func TestCheckModelsEmitsStreamProgressDeltas(t *testing.T) {
 	}
 }
 
+func TestStreamIgnoresRequestTimeoutWhileReceivingData(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			for _, chunk := range []string{"slow ", "stream ", "still ", "alive"} {
+				fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\n", chunk)
+				flusher.Flush()
+				time.Sleep(25 * time.Millisecond)
+			}
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	report, err := CheckModels(context.Background(), Config{
+		BaseURL:            server.URL + "/v1",
+		APIKey:             "test-key",
+		Protocol:           ProtocolOpenAIChat,
+		Mode:               ModeStream,
+		Timeout:            30 * time.Millisecond,
+		ConnectTimeout:     time.Second,
+		StreamFirstTimeout: 200 * time.Millisecond,
+		StreamIdleTimeout:  200 * time.Millisecond,
+		StreamMaxDuration:  time.Second,
+	}, []TaskSpec{{Root: server.URL + "/v1", Protocol: ProtocolOpenAIChat, Model: "slow-stream"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := report.Results[0].Stream
+	if !stream.OK {
+		t.Fatalf("stream failed even though chunks kept arriving: %+v", stream)
+	}
+	if stream.Preview != "slow stream still alive" {
+		t.Fatalf("stream preview = %q, want slow stream still alive", stream.Preview)
+	}
+	if stream.TotalMS <= 30 {
+		t.Fatalf("stream completed too quickly to prove request timeout was ignored: %+v", stream)
+	}
+}
+
+func TestStreamIdleTimeoutStopsAfterNoNewContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			time.Sleep(150 * time.Millisecond)
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	report, err := CheckModels(context.Background(), Config{
+		BaseURL:            server.URL + "/v1",
+		APIKey:             "test-key",
+		Protocol:           ProtocolOpenAIChat,
+		Mode:               ModeStream,
+		Timeout:            30 * time.Millisecond,
+		ConnectTimeout:     time.Second,
+		StreamFirstTimeout: 200 * time.Millisecond,
+		StreamIdleTimeout:  40 * time.Millisecond,
+		StreamMaxDuration:  time.Second,
+	}, []TaskSpec{{Root: server.URL + "/v1", Protocol: ProtocolOpenAIChat, Model: "idle-stream"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := report.Results[0].Stream
+	if stream.OK {
+		t.Fatalf("stream unexpectedly succeeded: %+v", stream)
+	}
+	if stream.ErrorClass != "stream_idle_timeout" {
+		t.Fatalf("error class = %q, want stream_idle_timeout: %+v", stream.ErrorClass, stream)
+	}
+	if stream.Preview != "partial" {
+		t.Fatalf("partial stream preview = %q, want partial", stream.Preview)
+	}
+}
+
+func TestStreamMaxDurationCanBeDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, _ := w.(http.Flusher)
+			for _, chunk := range []string{"max ", "duration ", "disabled"} {
+				fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\n", chunk)
+				flusher.Flush()
+				time.Sleep(25 * time.Millisecond)
+			}
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	report, err := CheckModels(context.Background(), Config{
+		BaseURL:            server.URL + "/v1",
+		APIKey:             "test-key",
+		Protocol:           ProtocolOpenAIChat,
+		Mode:               ModeStream,
+		Timeout:            30 * time.Millisecond,
+		ConnectTimeout:     time.Second,
+		StreamFirstTimeout: 200 * time.Millisecond,
+		StreamIdleTimeout:  200 * time.Millisecond,
+		StreamMaxDuration:  40 * time.Millisecond,
+		DisableStreamMax:   true,
+	}, []TaskSpec{{Root: server.URL + "/v1", Protocol: ProtocolOpenAIChat, Model: "no-max-stream"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := report.Results[0].Stream
+	if !stream.OK {
+		t.Fatalf("stream max duration was not disabled: %+v", stream)
+	}
+	if stream.Preview != "max duration disabled" {
+		t.Fatalf("stream preview = %q, want max duration disabled", stream.Preview)
+	}
+}
+
 func TestRequestsUseClientUserAgentByProtocolAndSurface(t *testing.T) {
 	var seen []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

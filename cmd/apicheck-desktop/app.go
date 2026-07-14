@@ -22,6 +22,9 @@ type CheckRequest struct {
 	Mode               string             `json:"mode"`
 	Concurrency        int                `json:"concurrency"`
 	Timeout            string             `json:"timeout"`
+	StreamFirstTimeout string             `json:"stream_first_timeout"`
+	StreamIdleTimeout  string             `json:"stream_idle_timeout"`
+	StreamMaxDuration  string             `json:"stream_max_duration"`
 	Filter             string             `json:"filter"`
 	MaxModels          int                `json:"max_models"`
 	SkipTLSVerify      bool               `json:"skip_tls_verify"`
@@ -65,7 +68,8 @@ func (a *App) CheckModels(req CheckRequest) (*checker.Report, error) {
 
 func configFromRequest(req CheckRequest) checker.Config {
 	timeout := parseDurationOrDefault(req.Timeout, 60*time.Second)
-	connectTimeout := parseDurationOrDefault(req.ConnectTimeout, 10*time.Second)
+	connectTimeout := parseDurationOrDefault(req.ConnectTimeout, 30*time.Second)
+	streamMaxDuration, disableStreamMax := parseStreamMaxDuration(req.StreamMaxDuration, 10*time.Minute)
 	return checker.Config{
 		BaseURL:                req.BaseURL,
 		APIKey:                 req.APIKey,
@@ -75,6 +79,10 @@ func configFromRequest(req CheckRequest) checker.Config {
 		Concurrency:            req.Concurrency,
 		Timeout:                timeout,
 		ConnectTimeout:         connectTimeout,
+		StreamFirstTimeout:     parseDurationOrDefault(req.StreamFirstTimeout, 60*time.Second),
+		StreamIdleTimeout:      parseDurationOrDefault(req.StreamIdleTimeout, 60*time.Second),
+		StreamMaxDuration:      streamMaxDuration,
+		DisableStreamMax:       disableStreamMax,
 		Filter:                 req.Filter,
 		MaxModels:              req.MaxModels,
 		InsecureSkipVerify:     req.SkipTLSVerify,
@@ -112,6 +120,21 @@ func parseDurationOrDefault(value string, fallback time.Duration) time.Duration 
 		return fallback
 	}
 	return parsed
+}
+
+func parseStreamMaxDuration(value string, fallback time.Duration) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback, false
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fallback, false
+	}
+	if parsed == 0 {
+		return 0, true
+	}
+	return parsed, false
 }
 
 func parseClientSurfaceOrDefault(value string, fallback checker.ClientSurface) checker.ClientSurface {

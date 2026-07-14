@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"apicheck/internal/checker"
 )
@@ -175,5 +176,30 @@ func TestAppHonorsConfiguredUASurfaces(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing configured UA surface %q in:\n%s", want, joined)
 		}
+	}
+}
+
+func TestDesktopConfigHonorsStreamTimeouts(t *testing.T) {
+	cfg := configFromRequest(CheckRequest{
+		Timeout:            "9s",
+		ConnectTimeout:     "30s",
+		StreamFirstTimeout: "11s",
+		StreamIdleTimeout:  "12s",
+		StreamMaxDuration:  "0",
+	})
+	if cfg.Timeout != 9*time.Second {
+		t.Fatalf("timeout = %s, want 9s", cfg.Timeout)
+	}
+	if cfg.ConnectTimeout != 30*time.Second {
+		t.Fatalf("connect timeout = %s, want 30s", cfg.ConnectTimeout)
+	}
+	if cfg.StreamFirstTimeout != 11*time.Second {
+		t.Fatalf("stream first timeout = %s, want 11s", cfg.StreamFirstTimeout)
+	}
+	if cfg.StreamIdleTimeout != 12*time.Second {
+		t.Fatalf("stream idle timeout = %s, want 12s", cfg.StreamIdleTimeout)
+	}
+	if cfg.StreamMaxDuration != 0 || !cfg.DisableStreamMax {
+		t.Fatalf("stream max duration = %s disable=%v, want disabled", cfg.StreamMaxDuration, cfg.DisableStreamMax)
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -30,16 +31,20 @@ func main() {
 		Frameless:        true,
 		CSSDragProperty:  "--wails-draggable",
 		CSSDragValue:     "drag",
-		BackgroundColour: options.NewRGBA(246, 247, 249, 255),
+		BackgroundColour: options.NewRGBA(0, 0, 0, 0),
 		Mac: &mac.Options{
-			// 作者 long: 透明 WebView 在圆角边缘容易被系统合成成黑边，桌面工具用浅色原生底色保持圆角观感更稳定。
+			// 作者 long: 这里不启用 NSVisualEffectView 材质层，否则无边框窗口四角会露出系统矩形底色。
+			// 真正的透明和圆角裁剪由 darwin_window_style.go 在原生窗口创建后补齐。
 			WindowIsTranslucent:  false,
-			WebviewIsTransparent: false,
+			WebviewIsTransparent: true,
 		},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
 		OnStartup: app.startup,
+		OnDomReady: func(ctx context.Context) {
+			applyRoundedTransparentWindow(12)
+		},
 		Bind: []interface{}{
 			app,
 		},

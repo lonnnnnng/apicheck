@@ -18,9 +18,9 @@ zip_path="${build_dir}/${app_name}-macOS.zip"
 rm -rf "${build_dir}"
 mkdir -p "${app_path}/Contents/MacOS" "${app_path}/Contents/Resources" "${iconset_dir}"
 
-# 作者 long: 当前项目使用 SVG 作为源图标，macOS 应用包需要 icns；这里用系统工具生成全尺寸 iconset，避免引入额外图形依赖。
-qlmanage -t -s 1024 -o "${build_dir}" "${root_dir}/assets/app-icon.svg" >/dev/null 2>&1
-mv "${build_dir}/app-icon.svg.png" "${icon_png}"
+# 作者 long: Quick Look 会把 SVG 栅格化到白色画布上，Dock 里会出现违和的白方块；
+# 这里用项目内置 Go 生成器直接输出带透明安全区的 PNG，再交给 iconutil 打包成 icns。
+go run "${root_dir}/scripts/icongen" -out "${icon_png}" -size 1024
 
 sips -z 16 16 "${icon_png}" --out "${iconset_dir}/icon_16x16.png" >/dev/null
 sips -z 32 32 "${icon_png}" --out "${iconset_dir}/icon_16x16@2x.png" >/dev/null

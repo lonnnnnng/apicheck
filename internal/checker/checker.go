@@ -16,7 +16,14 @@ import (
 	"time"
 )
 
-const defaultProbePrompt = "Reply with exactly: pong"
+const (
+	defaultProbePrompt       = "Reply with exactly: pong"
+	defaultRequestTimeout    = 60 * time.Second
+	defaultConnectTimeout    = 30 * time.Second
+	defaultStreamFirstWait   = 60 * time.Second
+	defaultStreamIdleTimeout = 60 * time.Second
+	defaultStreamMaxDuration = 10 * time.Minute
+)
 
 func Run(ctx context.Context, cfg Config) (*Report, error) {
 	report, err := ListModels(ctx, cfg)
@@ -50,7 +57,7 @@ func ListModels(ctx context.Context, cfg Config) (*Report, error) {
 	}
 
 	started := time.Now()
-	client := newHTTPClient(cfg)
+	client := newHTTPClient(cfg, cfg.Timeout, 0)
 	report := &Report{Roots: roots, Sources: []ModelSource{}, Tasks: []TaskSpec{}, Results: []ModelResult{}, StartedAt: started}
 	for _, root := range roots {
 		report.Sources = append(report.Sources, probeModelSources(ctx, client, cfg, root)...)
@@ -76,7 +83,7 @@ func CheckModels(ctx context.Context, cfg Config, tasks []TaskSpec) (*Report, er
 	started := time.Now()
 	report := &Report{Roots: roots, Sources: []ModelSource{}, Tasks: normalizeTaskSpecs(tasks), Results: []ModelResult{}, StartedAt: started}
 	if len(report.Tasks) > 0 {
-		report.Results = runTasks(ctx, newHTTPClient(cfg), cfg, report.Tasks)
+		report.Results = runTasks(ctx, cfg, report.Tasks)
 	}
 	report.FinishedAt = time.Now()
 	report.DurationMS = report.FinishedAt.Sub(started).Milliseconds()
@@ -94,10 +101,21 @@ func withDefaults(cfg Config) Config {
 		cfg.Concurrency = 2
 	}
 	if cfg.Timeout <= 0 {
-		cfg.Timeout = 60 * time.Second
+		cfg.Timeout = defaultRequestTimeout
 	}
 	if cfg.ConnectTimeout <= 0 {
-		cfg.ConnectTimeout = 10 * time.Second
+		cfg.ConnectTimeout = defaultConnectTimeout
+	}
+	if cfg.StreamFirstTimeout <= 0 {
+		cfg.StreamFirstTimeout = defaultStreamFirstWait
+	}
+	if cfg.StreamIdleTimeout <= 0 {
+		cfg.StreamIdleTimeout = defaultStreamIdleTimeout
+	}
+	if cfg.DisableStreamMax {
+		cfg.StreamMaxDuration = 0
+	} else if cfg.StreamMaxDuration <= 0 {
+		cfg.StreamMaxDuration = defaultStreamMaxDuration
 	}
 	if strings.TrimSpace(cfg.Prompt) == "" {
 		cfg.Prompt = defaultProbePrompt
@@ -108,18 +126,19 @@ func withDefaults(cfg Config) Config {
 	return cfg
 }
 
-func newHTTPClient(cfg Config) *http.Client {
+func newHTTPClient(cfg Config, totalTimeout, responseHeaderTimeout time.Duration) *http.Client {
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   cfg.ConnectTimeout,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		TLSHandshakeTimeout: cfg.ConnectTimeout,
+		TLSHandshakeTimeout:   cfg.ConnectTimeout,
+		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
 	if cfg.InsecureSkipVerify {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // 用户显式测试自签名网关时才会打开。
 	}
-	return &http.Client{Timeout: cfg.Timeout, Transport: transport}
+	return &http.Client{Timeout: totalTimeout, Transport: transport}
 }
 
 func probeModelSources(ctx context.Context, client *http.Client, cfg Config, root string) []ModelSource {
@@ -259,7 +278,9 @@ func normalizeTaskSpecs(tasks []TaskSpec) []TaskSpec {
 	return out
 }
 
-func runTasks(ctx context.Context, client *http.Client, cfg Config, tasks []TaskSpec) []ModelResult {
+func runTasks(ctx context.Context, cfg Config, tasks []TaskSpec) []ModelResult {
+	nonStreamClient := newHTTPClient(cfg, cfg.Timeout, 0)
+	streamClient := newHTTPClient(cfg, 0, cfg.StreamFirstTimeout)
 	jobs := make(chan modelTask)
 	results := make(chan ModelResult)
 	workers := cfg.Concurrency
@@ -272,7 +293,7 @@ func runTasks(ctx context.Context, client *http.Client, cfg Config, tasks []Task
 		go func() {
 			defer wg.Done()
 			for task := range jobs {
-				results <- runTask(ctx, client, cfg, task)
+				results <- runTask(ctx, nonStreamClient, streamClient, cfg, task)
 			}
 		}()
 	}
@@ -299,13 +320,13 @@ func runTasks(ctx context.Context, client *http.Client, cfg Config, tasks []Task
 	return out
 }
 
-func runTask(ctx context.Context, client *http.Client, cfg Config, task modelTask) ModelResult {
+func runTask(ctx context.Context, nonStreamClient, streamClient *http.Client, cfg Config, task modelTask) ModelResult {
 	result := ModelResult{Root: task.root, Protocol: task.protocol, Model: task.model}
 	if cfg.Mode == ModeBoth || cfg.Mode == ModeNonStream {
-		result.NonStream = probeConversation(ctx, client, cfg, task, false)
+		result.NonStream = probeConversation(ctx, nonStreamClient, cfg, task, false)
 	}
 	if cfg.Mode == ModeBoth || cfg.Mode == ModeStream {
-		result.Stream = probeConversation(ctx, client, cfg, task, true)
+		result.Stream = probeConversation(ctx, streamClient, cfg, task, true)
 	}
 	return result
 }
@@ -323,14 +344,18 @@ func probeConversation(ctx context.Context, client *http.Client, cfg Config, tas
 	firstByte := time.Since(start)
 	result.FirstByteMS = durationMS(firstByte)
 	if err != nil {
-		result.ErrorClass = "request_failed"
+		if stream && isTimeoutError(err) {
+			result.ErrorClass = "stream_first_timeout"
+		} else {
+			result.ErrorClass = "request_failed"
+		}
 		result.ErrorMessage = err.Error()
 		return result
 	}
 	defer resp.Body.Close()
 	result.HTTPStatus = resp.StatusCode
 	if stream {
-		readStreamResult(resp, task, start, &result, cfg.Progress)
+		readStreamResult(resp, task, start, cfg, &result)
 	} else {
 		readNonStreamResult(resp, task.protocol, start, &result)
 	}
@@ -433,38 +458,135 @@ func readNonStreamResult(resp *http.Response, protocol Protocol, start time.Time
 	result.OK = true
 }
 
-func readStreamResult(resp *http.Response, task modelTask, start time.Time, result *ProbeResult, progress func(ProgressEvent)) {
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+type streamReadItem struct {
+	line string
+	err  error
+}
+
+func readStreamResult(resp *http.Response, task modelTask, start time.Time, cfg Config, result *ProbeResult) {
+	lines := make(chan streamReadItem, 8)
+	done := make(chan struct{})
+	defer close(done)
+	go scanStreamLines(resp.Body, lines, done)
+
 	var rawResponse strings.Builder
 	var textPreview strings.Builder
 	var eventData []string
-	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), "\r")
-		rawResponse.WriteString(line)
-		rawResponse.WriteByte('\n')
-		if line == "" {
-			handleSSEEvent(task, start, &textPreview, &eventData, result, progress)
-			eventData = nil
-			continue
+
+	firstTimer := time.NewTimer(cfg.StreamFirstTimeout)
+	defer firstTimer.Stop()
+
+	var idleTimer *time.Timer
+	var idleC <-chan time.Time
+	if cfg.StreamIdleTimeout > 0 {
+		idleTimer = time.NewTimer(cfg.StreamIdleTimeout)
+		if !idleTimer.Stop() {
+			<-idleTimer.C
 		}
-		if strings.HasPrefix(line, "data:") {
-			eventData = append(eventData, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-			continue
+		idleC = idleTimer.C
+		defer idleTimer.Stop()
+	}
+
+	var maxTimer *time.Timer
+	var maxC <-chan time.Time
+	if cfg.StreamMaxDuration > 0 {
+		remaining := cfg.StreamMaxDuration - time.Since(start)
+		if remaining <= 0 {
+			setStreamTimeoutResult(resp, result, &rawResponse, &textPreview, start, "stream_max_duration", cfg.StreamMaxDuration)
+			return
 		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			// 兼容网关在流式探测失败时常直接返回 JSON 错误，而不是 SSE。
-			// 保留这些普通行，才能给用户看到真实的鉴权/模型/端点错误。
-			appendPreviewLine(&textPreview, line)
+		maxTimer = time.NewTimer(remaining)
+		maxC = maxTimer.C
+		defer maxTimer.Stop()
+	}
+
+	firstPacketSeen := false
+	for {
+		select {
+		case item, ok := <-lines:
+			if !ok {
+				finalizeStreamResult(resp, task, start, &rawResponse, &textPreview, &eventData, result, cfg.Progress)
+				return
+			}
+			if item.err != nil {
+				handleSSEEvent(task, start, &textPreview, &eventData, result, cfg.Progress)
+				result.TotalMS = elapsedMS(start)
+				result.RawResponse = trimBody([]byte(rawResponse.String()))
+				result.ErrorClass = "stream_read_failed"
+				result.ErrorMessage = item.err.Error()
+				return
+			}
+			if !firstPacketSeen {
+				firstPacketSeen = true
+				stopTimer(firstTimer)
+			}
+			resetTimer(idleTimer, cfg.StreamIdleTimeout)
+			processStreamLine(resp, task, start, item.line, &rawResponse, &textPreview, &eventData, result, cfg.Progress)
+		case <-firstTimer.C:
+			setStreamTimeoutResult(resp, result, &rawResponse, &textPreview, start, "stream_first_timeout", cfg.StreamFirstTimeout)
+			return
+		case <-idleC:
+			setStreamTimeoutResult(resp, result, &rawResponse, &textPreview, start, "stream_idle_timeout", cfg.StreamIdleTimeout)
+			return
+		case <-maxC:
+			setStreamTimeoutResult(resp, result, &rawResponse, &textPreview, start, "stream_max_duration", cfg.StreamMaxDuration)
+			return
 		}
 	}
-	handleSSEEvent(task, start, &textPreview, &eventData, result, progress)
-	result.TotalMS = elapsedMS(start)
+}
+
+func scanStreamLines(body io.ReadCloser, out chan<- streamReadItem, done <-chan struct{}) {
+	defer close(out)
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		if !sendStreamReadItem(done, out, streamReadItem{line: strings.TrimRight(scanner.Text(), "\r")}) {
+			return
+		}
+	}
 	if err := scanner.Err(); err != nil {
-		result.ErrorClass = "stream_read_failed"
-		result.ErrorMessage = err.Error()
+		sendStreamReadItem(done, out, streamReadItem{err: err})
+	}
+}
+
+func sendStreamReadItem(done <-chan struct{}, out chan<- streamReadItem, item streamReadItem) bool {
+	// 作者 long: 超时路径会主动关闭响应体并返回结果，读取协程需要能立刻退出，
+	// 否则慢速网关持续写入时可能卡在无人接收的 channel 发送上。
+	select {
+	case <-done:
+		return false
+	default:
+	}
+	select {
+	case <-done:
+		return false
+	case out <- item:
+		return true
+	}
+}
+
+func processStreamLine(resp *http.Response, task modelTask, start time.Time, line string, rawResponse, textPreview *strings.Builder, eventData *[]string, result *ProbeResult, progress func(ProgressEvent)) {
+	rawResponse.WriteString(line)
+	rawResponse.WriteByte('\n')
+	if line == "" {
+		handleSSEEvent(task, start, textPreview, eventData, result, progress)
+		*eventData = nil
 		return
 	}
+	if strings.HasPrefix(line, "data:") {
+		*eventData = append(*eventData, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// 兼容网关在流式探测失败时常直接返回 JSON 错误，而不是 SSE。
+		// 保留这些普通行，才能给用户看到真实的鉴权/模型/端点错误。
+		appendPreviewLine(textPreview, line)
+	}
+}
+
+func finalizeStreamResult(resp *http.Response, task modelTask, start time.Time, rawResponse, textPreview *strings.Builder, eventData *[]string, result *ProbeResult, progress func(ProgressEvent)) {
+	handleSSEEvent(task, start, textPreview, eventData, result, progress)
+	result.TotalMS = elapsedMS(start)
 	rawBody := []byte(rawResponse.String())
 	result.RawResponse = trimBody(rawBody)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -480,6 +602,49 @@ func readStreamResult(resp *http.Response, task modelTask, start time.Time, resu
 		result.Preview = result.RawResponse
 	}
 	result.OK = true
+}
+
+func setStreamTimeoutResult(resp *http.Response, result *ProbeResult, rawResponse, textPreview *strings.Builder, start time.Time, class string, duration time.Duration) {
+	_ = resp.Body.Close()
+	result.TotalMS = elapsedMS(start)
+	result.RawResponse = trimBody([]byte(rawResponse.String()))
+	result.RawError = result.RawResponse
+	if text := strings.TrimSpace(textPreview.String()); text != "" {
+		result.Preview = text
+	}
+	result.ErrorClass = class
+	result.ErrorMessage = fmt.Sprintf("%s after %s", class, duration)
+}
+
+func stopTimer(timer *time.Timer) {
+	if timer == nil {
+		return
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+}
+
+func resetTimer(timer *time.Timer, duration time.Duration) {
+	if timer == nil || duration <= 0 {
+		return
+	}
+	stopTimer(timer)
+	timer.Reset(duration)
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func handleSSEEvent(task modelTask, start time.Time, preview *strings.Builder, eventData *[]string, result *ProbeResult, progress func(ProgressEvent)) {

@@ -59,6 +59,10 @@ apicheck \
   --mode both \
   --concurrency 2 \
   --timeout 60s \
+  --connect-timeout 30s \
+  --stream-first-timeout 60s \
+  --stream-idle-timeout 60s \
+  --stream-max-duration 10m \
   --format table
 ```
 
@@ -71,8 +75,11 @@ apicheck \
 | `--protocol` | `auto` | `auto/openai-chat/openai-responses/anthropic-messages/openai/all` |
 | `--mode` | `both` | `nonstream/stream/both` |
 | `--concurrency` | `2` | 模型探测并发数，默认保守避免触发限流 |
-| `--timeout` | `60s` | 单次请求总超时 |
-| `--connect-timeout` | `10s` | TCP/TLS 建连超时 |
+| `--timeout` | `60s` | 模型列表和非流式请求总超时 |
+| `--connect-timeout` | `30s` | TCP/TLS 建连超时 |
+| `--stream-first-timeout` | `60s` | 流式请求等待响应头或首个 SSE 包的超时 |
+| `--stream-idle-timeout` | `60s` | 流式过程中连续没有新内容的空闲超时 |
+| `--stream-max-duration` | `10m` | 单次流式请求最长总时长，`0` 表示不限制 |
 | `--filter` | 空 | 只检测匹配模型 ID 的模型 |
 | `--max-models` | `0` | 0 表示不限制；调试时可限制数量 |
 | `--format` | `table` | `table/json/markdown` |
@@ -328,12 +335,31 @@ Reply with exactly: pong
 | 字段 | 含义 |
 | --- | --- |
 | `startAt` | 发起请求前 |
-| `firstByteMs` | 收到响应头或第一批 body 字节的时间 |
+| `firstByteMs` | `http.Client.Do` 返回的时间，通常表示响应头已返回 |
 | `firstEventMs` | 流式时解析到第一个 SSE event 的时间 |
 | `firstTextMs` | 流式时解析到第一个非空文本 delta 的时间 |
 | `totalMs` | 请求完整结束或失败的时间 |
 
 非流式也记录 `firstByteMs` 和 `totalMs`。非流式没有 `firstTextMs`，因为整个 JSON 一次返回。
+
+### 9.1.1 超时策略
+
+模型列表和非流式请求使用普通总超时，默认 `60s`。流式请求不使用 `http.Client.Timeout` 作为总时长限制，因为长文本或慢速模型只要持续产生新内容，就不应被普通请求总超时提前切断。
+
+流式请求拆成四类超时：
+
+| 超时项 | 默认值 | 触发条件 |
+| --- | --- | --- |
+| 建连超时 | `30s` | TCP 连接或 TLS 握手超过限制 |
+| 首包超时 | `60s` | 响应头或首个 SSE 行长时间没有到达 |
+| 空闲超时 | `60s` | 已进入流式响应后，连续没有新 SSE 行 |
+| 最大总时长 | `10m` | 单次流式检测总耗时超过限制；配置为 `0` 时关闭 |
+
+错误分类：
+
+- `stream_first_timeout`：建连后一直等不到响应头或首个流式包。
+- `stream_idle_timeout`：已经收到过流式内容，但连续空闲超过配置值。
+- `stream_max_duration`：流式请求持续时间超过最大总时长。
 
 ### 9.2 OpenAI Chat Completions 流式
 
@@ -415,7 +441,10 @@ type == "content_block_delta" 且 delta.type == "text_delta" 时读取 delta.tex
 | `rate_limited` | 429 或等价错误 |
 | `quota_exceeded` | 额度不足、余额不足、billing hard limit |
 | `invalid_request` | 400 且无法归类为模型/参数不支持 |
-| `timeout` | 请求超过配置超时 |
+| `timeout` | 模型列表或非流式请求超过配置总超时 |
+| `stream_first_timeout` | 流式请求等待响应头或首个 SSE 包超时 |
+| `stream_idle_timeout` | 流式响应过程中连续无新内容超时 |
+| `stream_max_duration` | 流式请求超过配置的最长总时长 |
 | `network_error` | DNS、TCP、TLS、连接重置等 |
 | `parse_error` | JSON/SSE 解析失败 |
 | `protocol_mismatch` | 返回内容明显不是当前协议格式 |

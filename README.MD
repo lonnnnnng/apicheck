@@ -9,6 +9,7 @@ API Checker 是一个用于检测 OpenAI / Anthropic 兼容接口的本地工具
 - 支持 OpenAI 风格 `GET /models`、`POST /chat/completions`、`POST /responses`。
 - 支持 Anthropic 风格 `GET /models`、`POST /messages`。
 - 支持非流式和 SSE 流式对话检测。
+- 流式检测拆分建连、首包、空闲和最长总时长超时，避免长输出被普通请求总超时提前切断。
 - 支持模型名称实时检索。
 - 支持单模型测试，测试协议和模式在弹窗中选择。
 - 支持自定义检测提示词，并缓存最近一次 `Base URL`、`API Key` 和提示词。
@@ -24,7 +25,7 @@ API Checker 是一个用于检测 OpenAI / Anthropic 兼容接口的本地工具
 assets/app-icon.svg
 ```
 
-图标使用蓝色、青色和橙色渐变作为基础，中心包含连接节点、对话检测路径和绿色校验标记，表达“模型接口接入检测”的用途。桌面界面左上角的小图标也使用同一套视觉。
+图标使用浅色圆角底和透明安全区，中心保留蓝色、青色和橙色的连接节点与绿色校验标记，表达“模型接口接入检测”的用途。透明留白用于避免 Dock 中出现贴边、过大的方块感。
 
 如果后续要打包成 `.app`，可以基于 `assets/app-icon.svg` 导出 `appicon.png` 或 `.icns`，再接入 Wails 打包资源。
 
@@ -93,8 +94,20 @@ go run ./cmd/apicheck \
   --protocol auto \
   --mode both \
   --concurrency 2 \
-  --timeout 60s
+  --timeout 60s \
+  --connect-timeout 30s \
+  --stream-first-timeout 60s \
+  --stream-idle-timeout 60s \
+  --stream-max-duration 10m
 ```
+
+超时说明：
+
+- `--timeout`：模型列表和非流式请求总超时，默认 `60s`。
+- `--connect-timeout`：TCP/TLS 建连超时，默认 `30s`。
+- `--stream-first-timeout`：流式请求等待响应头/首个 SSE 包的超时，默认 `60s`。
+- `--stream-idle-timeout`：流式过程中连续没有新内容的空闲超时，默认 `60s`。
+- `--stream-max-duration`：单次流式请求最长总时长，默认 `10m`；填 `0` 表示不限制。
 
 也可以通过环境变量传入 API Key：
 

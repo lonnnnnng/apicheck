@@ -38,6 +38,10 @@ type Config struct {
 	Concurrency            int
 	Timeout                time.Duration
 	ConnectTimeout         time.Duration
+	StreamFirstTimeout     time.Duration
+	StreamIdleTimeout      time.Duration
+	StreamMaxDuration      time.Duration
+	DisableStreamMax       bool
 	Filter                 string
 	MaxModels              int
 	InsecureSkipVerify     bool
