@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"apicheck/internal/checker"
+	"apicheck/internal/presentation"
 )
 
 func main() {
@@ -103,6 +104,10 @@ type checkRequest struct {
 	Tasks              []checker.TaskSpec `json:"tasks"`
 }
 
+type textRequest struct {
+	Text string `json:"text"`
+}
+
 func runServer(listen, staticDir string) error {
 	fmt.Printf("API Checker web UI: http://%s\n", listen)
 	return http.ListenAndServe(listen, newServerHandler(staticDir))
@@ -144,7 +149,45 @@ func newServerHandler(staticDir string) http.Handler {
 		}
 		writeJSONReport(w, report, err)
 	})
+	mux.HandleFunc("/api/markdown", func(w http.ResponseWriter, r *http.Request) {
+		var req textRequest
+		if !decodeJSONRequest(w, r, &req) {
+			return
+		}
+		html, err := presentation.RenderMarkdown(req.Text)
+		writeJSONValue(w, map[string]string{"html": html}, err)
+	})
+	mux.HandleFunc("/api/qrcode", func(w http.ResponseWriter, r *http.Request) {
+		var req textRequest
+		if !decodeJSONRequest(w, r, &req) {
+			return
+		}
+		dataURL, err := presentation.GenerateQRCodeDataURL(req.Text)
+		writeJSONValue(w, map[string]string{"data_url": dataURL}, err)
+	})
 	return mux
+}
+
+func decodeJSONRequest(w http.ResponseWriter, r *http.Request, target any) bool {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func writeJSONValue(w http.ResponseWriter, value any, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(value)
 }
 
 func configFromRequest(req checkRequest) checker.Config {

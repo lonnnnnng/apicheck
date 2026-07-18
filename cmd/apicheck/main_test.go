@@ -208,3 +208,46 @@ func TestConfigFromRequestHonorsStreamTimeouts(t *testing.T) {
 		t.Fatalf("stream max duration = %s disable=%v, want disabled", cfg.StreamMaxDuration, cfg.DisableStreamMax)
 	}
 }
+
+func TestPresentationEndpoints(t *testing.T) {
+	server := httptest.NewServer(newServerHandler("../../prototype"))
+	defer server.Close()
+
+	markdownBody, err := json.Marshal(textRequest{Text: "# 标题\n\n**内容**"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	markdownResp, err := http.Post(server.URL+"/api/markdown", "application/json", bytes.NewReader(markdownBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer markdownResp.Body.Close()
+	var markdownPayload struct {
+		HTML string `json:"html"`
+	}
+	if err := json.NewDecoder(markdownResp.Body).Decode(&markdownPayload); err != nil {
+		t.Fatal(err)
+	}
+	if markdownResp.StatusCode != http.StatusOK || !strings.Contains(markdownPayload.HTML, "<h1>标题</h1>") {
+		t.Fatalf("markdown response status=%d payload=%+v", markdownResp.StatusCode, markdownPayload)
+	}
+
+	qrBody, err := json.Marshal(textRequest{Text: "https://example.com/v1,sk-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qrResp, err := http.Post(server.URL+"/api/qrcode", "application/json", bytes.NewReader(qrBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer qrResp.Body.Close()
+	var qrPayload struct {
+		DataURL string `json:"data_url"`
+	}
+	if err := json.NewDecoder(qrResp.Body).Decode(&qrPayload); err != nil {
+		t.Fatal(err)
+	}
+	if qrResp.StatusCode != http.StatusOK || !strings.HasPrefix(qrPayload.DataURL, "data:image/png;base64,") {
+		t.Fatalf("QR response status=%d payload prefix=%q", qrResp.StatusCode, qrPayload.DataURL[:min(len(qrPayload.DataURL), 32)])
+	}
+}
