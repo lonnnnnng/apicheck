@@ -179,7 +179,7 @@ func listModels(ctx context.Context, client *http.Client, cfg Config, root, auth
 	}
 	req.Header.Set("Accept", "application/json")
 	applyAuthHeaders(req, cfg.APIKey, authStyle)
-	applyClientHeaders(req, authStyle, cfg.clientSurfaceForAuthStyle(authStyle))
+	applyClientHeaders(req, authStyle, cfg)
 
 	start := time.Now()
 	resp, err := client.Do(req)
@@ -380,10 +380,10 @@ func buildConversationRequest(ctx context.Context, cfg Config, task modelTask, s
 	}
 	if task.protocol == ProtocolAnthropicMessages {
 		applyAuthHeaders(req, cfg.APIKey, "anthropic")
-		applyClientHeaders(req, "anthropic", cfg.clientSurfaceForAuthStyle("anthropic"))
+		applyClientHeaders(req, "anthropic", cfg)
 	} else {
 		applyAuthHeaders(req, cfg.APIKey, "openai")
-		applyClientHeaders(req, "openai", cfg.clientSurfaceForAuthStyle("openai"))
+		applyClientHeaders(req, "openai", cfg)
 	}
 	return req, nil
 }

@@ -41,24 +41,37 @@ func (cfg Config) clientSurfaceForAuthStyle(authStyle string) ClientSurface {
 	return cfg.OpenAIClientSurface
 }
 
-func applyClientHeaders(req *http.Request, authStyle string, surface ClientSurface) {
-	for _, header := range clientHeaders(authStyle, surface) {
+func applyClientHeaders(req *http.Request, authStyle string, cfg Config) {
+	for _, header := range clientHeaders(authStyle, cfg) {
 		req.Header.Set(header.name, header.value)
 	}
 }
 
-func clientHeaders(authStyle string, surface ClientSurface) []clientHeader {
+func clientHeaders(authStyle string, cfg Config) []clientHeader {
+	surface := cfg.clientSurfaceForAuthStyle(authStyle)
 	if authStyle == "anthropic" {
 		return []clientHeader{
-			{name: "User-Agent", value: claudeCodeUserAgent()},
-			{name: "anthropic-client-platform", value: claudeCodeClientPlatform(surface)},
+			{name: "User-Agent", value: configuredClientHeaderValue(cfg.AnthropicUserAgent, claudeCodeUserAgent())},
+			{name: "anthropic-client-platform", value: configuredClientHeaderValue(cfg.AnthropicClientPlatform, claudeCodeClientPlatform(surface))},
 		}
 	}
-	originator := codexOriginator(surface)
+	originator := configuredClientHeaderValue(cfg.OpenAIOriginator, codexOriginator(surface))
 	return []clientHeader{
-		{name: "User-Agent", value: codexUserAgent(originator)},
+		{name: "User-Agent", value: configuredClientHeaderValue(cfg.OpenAIUserAgent, codexUserAgent(originator))},
 		{name: "originator", value: originator},
 	}
+}
+
+func configuredClientHeaderValue(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	// 作者 long: 自定义标识会直接进入 HTTP Header，沿用现有 ASCII 清洗可阻断换行注入并避免 Go 拒绝非法字节。
+	if value = strings.TrimSpace(sanitizeHeaderValue(value)); value == "" {
+		return fallback
+	}
+	return value
 }
 
 func codexUserAgent(originator string) string {

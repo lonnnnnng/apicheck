@@ -30,25 +30,29 @@ const (
 )
 
 type Config struct {
-	BaseURL                string
-	APIKey                 string
-	Prompt                 string
-	Protocol               Protocol
-	Mode                   Mode
-	Concurrency            int
-	Timeout                time.Duration
-	ConnectTimeout         time.Duration
-	StreamFirstTimeout     time.Duration
-	StreamIdleTimeout      time.Duration
-	StreamMaxDuration      time.Duration
-	DisableStreamMax       bool
-	Filter                 string
-	MaxModels              int
-	InsecureSkipVerify     bool
-	ClientSurface          ClientSurface
-	OpenAIClientSurface    ClientSurface
-	AnthropicClientSurface ClientSurface
-	Progress               func(ProgressEvent)
+	BaseURL                 string
+	APIKey                  string
+	Prompt                  string
+	Protocol                Protocol
+	Mode                    Mode
+	Concurrency             int
+	Timeout                 time.Duration
+	ConnectTimeout          time.Duration
+	StreamFirstTimeout      time.Duration
+	StreamIdleTimeout       time.Duration
+	StreamMaxDuration       time.Duration
+	DisableStreamMax        bool
+	Filter                  string
+	MaxModels               int
+	InsecureSkipVerify      bool
+	ClientSurface           ClientSurface
+	OpenAIClientSurface     ClientSurface
+	AnthropicClientSurface  ClientSurface
+	OpenAIUserAgent         string
+	OpenAIOriginator        string
+	AnthropicUserAgent      string
+	AnthropicClientPlatform string
+	Progress                func(ProgressEvent)
 }
 
 type ProgressEvent struct {

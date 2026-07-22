@@ -16,24 +16,28 @@ type App struct {
 }
 
 type CheckRequest struct {
-	BaseURL            string             `json:"base_url"`
-	APIKey             string             `json:"api_key"`
-	Prompt             string             `json:"prompt"`
-	Protocol           string             `json:"protocol"`
-	Mode               string             `json:"mode"`
-	Concurrency        int                `json:"concurrency"`
-	Timeout            string             `json:"timeout"`
-	StreamFirstTimeout string             `json:"stream_first_timeout"`
-	StreamIdleTimeout  string             `json:"stream_idle_timeout"`
-	StreamMaxDuration  string             `json:"stream_max_duration"`
-	Filter             string             `json:"filter"`
-	MaxModels          int                `json:"max_models"`
-	SkipTLSVerify      bool               `json:"skip_tls_verify"`
-	ConnectTimeout     string             `json:"connect_timeout"`
-	OpenAIUASurface    string             `json:"openai_ua_surface"`
-	AnthropicUASurface string             `json:"anthropic_ua_surface"`
-	LiveEventName      string             `json:"live_event_name"`
-	Tasks              []checker.TaskSpec `json:"tasks"`
+	BaseURL                 string             `json:"base_url"`
+	APIKey                  string             `json:"api_key"`
+	Prompt                  string             `json:"prompt"`
+	Protocol                string             `json:"protocol"`
+	Mode                    string             `json:"mode"`
+	Concurrency             int                `json:"concurrency"`
+	Timeout                 string             `json:"timeout"`
+	StreamFirstTimeout      string             `json:"stream_first_timeout"`
+	StreamIdleTimeout       string             `json:"stream_idle_timeout"`
+	StreamMaxDuration       string             `json:"stream_max_duration"`
+	Filter                  string             `json:"filter"`
+	MaxModels               int                `json:"max_models"`
+	SkipTLSVerify           bool               `json:"skip_tls_verify"`
+	ConnectTimeout          string             `json:"connect_timeout"`
+	OpenAIUASurface         string             `json:"openai_ua_surface"`
+	AnthropicUASurface      string             `json:"anthropic_ua_surface"`
+	OpenAIUserAgent         string             `json:"openai_user_agent"`
+	OpenAIOriginator        string             `json:"openai_originator"`
+	AnthropicUserAgent      string             `json:"anthropic_user_agent"`
+	AnthropicClientPlatform string             `json:"anthropic_client_platform"`
+	LiveEventName           string             `json:"live_event_name"`
+	Tasks                   []checker.TaskSpec `json:"tasks"`
 }
 
 func NewApp() *App {
@@ -83,24 +87,28 @@ func configFromRequest(req CheckRequest) checker.Config {
 	connectTimeout := parseDurationOrDefault(req.ConnectTimeout, 30*time.Second)
 	streamMaxDuration, disableStreamMax := parseStreamMaxDuration(req.StreamMaxDuration, 10*time.Minute)
 	return checker.Config{
-		BaseURL:                req.BaseURL,
-		APIKey:                 req.APIKey,
-		Prompt:                 req.Prompt,
-		Protocol:               checker.Protocol(strings.TrimSpace(req.Protocol)),
-		Mode:                   checker.Mode(strings.TrimSpace(req.Mode)),
-		Concurrency:            req.Concurrency,
-		Timeout:                timeout,
-		ConnectTimeout:         connectTimeout,
-		StreamFirstTimeout:     parseDurationOrDefault(req.StreamFirstTimeout, 60*time.Second),
-		StreamIdleTimeout:      parseDurationOrDefault(req.StreamIdleTimeout, 60*time.Second),
-		StreamMaxDuration:      streamMaxDuration,
-		DisableStreamMax:       disableStreamMax,
-		Filter:                 req.Filter,
-		MaxModels:              req.MaxModels,
-		InsecureSkipVerify:     req.SkipTLSVerify,
-		ClientSurface:          checker.ClientSurfaceDesktop,
-		OpenAIClientSurface:    parseClientSurfaceOrDefault(req.OpenAIUASurface, checker.ClientSurfaceDesktop),
-		AnthropicClientSurface: parseClientSurfaceOrDefault(req.AnthropicUASurface, checker.ClientSurfaceDesktop),
+		BaseURL:                 req.BaseURL,
+		APIKey:                  req.APIKey,
+		Prompt:                  req.Prompt,
+		Protocol:                checker.Protocol(strings.TrimSpace(req.Protocol)),
+		Mode:                    checker.Mode(strings.TrimSpace(req.Mode)),
+		Concurrency:             req.Concurrency,
+		Timeout:                 timeout,
+		ConnectTimeout:          connectTimeout,
+		StreamFirstTimeout:      parseDurationOrDefault(req.StreamFirstTimeout, 60*time.Second),
+		StreamIdleTimeout:       parseDurationOrDefault(req.StreamIdleTimeout, 60*time.Second),
+		StreamMaxDuration:       streamMaxDuration,
+		DisableStreamMax:        disableStreamMax,
+		Filter:                  req.Filter,
+		MaxModels:               req.MaxModels,
+		InsecureSkipVerify:      req.SkipTLSVerify,
+		ClientSurface:           checker.ClientSurfaceDesktop,
+		OpenAIClientSurface:     parseClientSurfaceOrDefault(req.OpenAIUASurface, checker.ClientSurfaceDesktop),
+		AnthropicClientSurface:  parseClientSurfaceOrDefault(req.AnthropicUASurface, checker.ClientSurfaceDesktop),
+		OpenAIUserAgent:         req.OpenAIUserAgent,
+		OpenAIOriginator:        req.OpenAIOriginator,
+		AnthropicUserAgent:      req.AnthropicUserAgent,
+		AnthropicClientPlatform: req.AnthropicClientPlatform,
 	}
 }
 

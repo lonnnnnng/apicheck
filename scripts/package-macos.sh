@@ -3,7 +3,7 @@ set -euo pipefail
 
 root_dir="${0:A:h:h}"
 app_name="API Checker"
-app_version="1.0.1"
+app_version="1.0.2"
 bundle_id="local.apicheck.desktop"
 build_dir="${root_dir}/build/macos"
 stage_dir="${build_dir}/stage"
