@@ -317,8 +317,8 @@ func renderTable(report *checker.Report) string {
 		builder.WriteString("\nno model probe tasks generated\n")
 		return builder.String()
 	}
-	builder.WriteString("\nMODEL                           PROTOCOL              NONSTREAM        STREAM           FIRST TEXT      TOTAL\n")
-	builder.WriteString(strings.Repeat("-", 112) + "\n")
+	builder.WriteString("\nMODEL                           PROTOCOL              NONSTREAM        STREAM           FIRST TEXT      TOTAL           TOKENS (IN/OUT/CACHED/TOTAL)\n")
+	builder.WriteString(strings.Repeat("-", 128) + "\n")
 	results := append([]checker.ModelResult(nil), report.Results...)
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].Model == results[j].Model {
@@ -338,7 +338,14 @@ func renderTable(report *checker.Report) string {
 			first = millis(result.NonStream.FirstByteMS, 0)
 			total = millis(result.NonStream.TotalMS, 0)
 		}
-		fmt.Fprintf(&builder, "%-31s %-21s %-16s %-16s %-15s %s\n", truncate(result.Model, 31), result.Protocol, non, stream, first, total)
+		tokens := renderTokens(result.NonStream)
+		if result.Stream.Tested && result.NonStream.Tested {
+			// 两列都展示时取耗时语义更完整的流式结果；只有非流式时用非流式的。
+			tokens = renderTokens(result.Stream)
+		} else if result.Stream.Tested {
+			tokens = renderTokens(result.Stream)
+		}
+		fmt.Fprintf(&builder, "%-31s %-21s %-16s %-16s %-15s %-15s %s\n", truncate(result.Model, 31), result.Protocol, non, stream, first, total, tokens)
 	}
 	fmt.Fprintf(&builder, "\nduration: %dms\n", report.DurationMS)
 	return builder.String()
@@ -355,6 +362,15 @@ func renderProbe(result checker.ProbeResult) string {
 		return fmt.Sprintf("fail %d/%s", result.HTTPStatus, result.ErrorClass)
 	}
 	return "fail " + result.ErrorClass
+}
+
+// renderTokens 输出 "in/out/cached/total"；usage 全为零说明网关没有返回 usage。
+func renderTokens(result checker.ProbeResult) string {
+	usage := result.TokenUsage
+	if usage.Input == 0 && usage.Output == 0 && usage.Cached == 0 && usage.Total == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%d/%d/%d/%d", usage.Input, usage.Output, usage.Cached, usage.Total)
 }
 
 func millis(primary, fallback int64) string {

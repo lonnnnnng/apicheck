@@ -520,6 +520,7 @@ func readNonStreamResult(resp *http.Response, protocol Protocol, start time.Time
 	} else {
 		result.Preview = result.RawResponse
 	}
+	result.TokenUsage = extractTokenUsage(protocol, body, false)
 	result.OK = true
 }
 
@@ -798,6 +799,11 @@ func handleSSEEvent(task modelTask, start time.Time, capture *streamCapture, eve
 	if result.FirstTextMS == 0 && eventHasText(task.protocol, []byte(data)) {
 		result.FirstTextMS = elapsedMS(start)
 	}
+	// usage 只在最后一个事件里出现（chat 的最终 chunk / responses 的 completed /
+	// anthropic 的 message_delta），每次覆盖写入即可拿到最终值。
+	if usage := extractTokenUsage(task.protocol, []byte(data), true); usage != (TokenUsage{}) {
+		result.TokenUsage = usage
+	}
 }
 
 func emitProgress(progress func(ProgressEvent), task modelTask, kind, text, raw string) {
@@ -828,6 +834,79 @@ func durationMS(duration time.Duration) int64 {
 		return 1
 	}
 	return ms
+}
+
+// extractTokenUsage 从响应体的 usage 字段提取 token 用量，覆盖三种协议：
+//   - openai-chat:  usage.prompt_tokens / completion_tokens / total_tokens /
+//     prompt_tokens_details.cached_tokens
+//   - openai-responses: usage.input_tokens / output_tokens / total_tokens /
+//     output_tokens_details.cached_tokens
+//   - anthropic-messages: usage.input_tokens / output_tokens /
+//     cache_read_input_tokens + cache_creation_input_tokens
+//
+// 网关普遍会省略 usage（尤其流式中间 chunk），此时返回零值让前端不展示。
+// 流式场景下 chunk 可能不完整，解析失败时静默跳过。
+func extractTokenUsage(protocol Protocol, body []byte, fromStream bool) TokenUsage {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return TokenUsage{}
+	}
+	usage, _ := payload["usage"].(map[string]any)
+	if usage == nil {
+		// OpenAI Responses 把 usage 包在 response 对象里。
+		if response, ok := payload["response"].(map[string]any); ok {
+			usage, _ = response["usage"].(map[string]any)
+		}
+	}
+	if usage == nil {
+		return TokenUsage{}
+	}
+	numeric := func(keys ...string) int64 {
+		for _, key := range keys {
+			if value, ok := usage[key].(float64); ok && value > 0 {
+				return int64(value)
+			}
+		}
+		return 0
+	}
+	cachedIn := func(container map[string]any, keys ...string) int64 {
+		for _, key := range keys {
+			if value, ok := container[key].(float64); ok && value > 0 {
+				return int64(value)
+			}
+		}
+		return 0
+	}
+	token := TokenUsage{FromStream: fromStream}
+	switch protocol {
+	case ProtocolOpenAIChat:
+		token.Input = numeric("prompt_tokens")
+		token.Output = numeric("completion_tokens")
+		token.Total = numeric("total_tokens")
+		if details, ok := usage["prompt_tokens_details"].(map[string]any); ok {
+			token.Cached = cachedIn(details, "cached_tokens")
+		}
+	case ProtocolOpenAIResponses:
+		token.Input = numeric("input_tokens")
+		token.Output = numeric("output_tokens")
+		token.Total = numeric("total_tokens")
+		if details, ok := usage["output_tokens_details"].(map[string]any); ok {
+			token.Cached = cachedIn(details, "cached_tokens")
+		}
+	case ProtocolAnthropicMessages:
+		token.Input = numeric("input_tokens")
+		token.Output = numeric("output_tokens")
+		token.Cached = numeric("cache_read_input_tokens") + numeric("cache_creation_input_tokens")
+	default:
+		return TokenUsage{}
+	}
+	if token.Total == 0 && (token.Input > 0 || token.Output > 0) {
+		token.Total = token.Input + token.Output
+	}
+	if token.Input == 0 && token.Output == 0 && token.Cached == 0 && token.Total == 0 {
+		return TokenUsage{}
+	}
+	return token
 }
 
 func extractConversationText(protocol Protocol, body []byte) string {

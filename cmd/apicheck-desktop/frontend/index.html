@@ -143,7 +143,7 @@
         <div class="list-searchbar"><input class="search" id="search" type="search" aria-label="模型名称检索" autocomplete="off" spellcheck="false" placeholder="输入模型名称实时检索" value=""></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>模型 ID</th><th>非流式</th><th>流式</th><th>首字</th><th>总耗时</th><th class="action-head">操作</th></tr></thead>
+            <thead><tr><th>模型 ID</th><th>非流式</th><th>流式</th><th>首字</th><th>总耗时</th><th>Tokens 输入/输出/缓存/总计</th><th class="action-head">操作</th></tr></thead>
             <tbody id="rows"></tbody>
           </table>
           <div class="empty" id="empty" role="status" aria-live="polite">
@@ -398,6 +398,13 @@ let liveStreamOff=null;
 let liveStreamSeen=new Set();
 function labelFor(protocol){return protocol==='anthropic-messages'?'Anthropic Messages':protocol==='openai-responses'?'OpenAI Responses':'OpenAI Chat'}
 function ms(value){return value>0?`${value}ms`:'-'}
+// 作者 long: usage 统一为 输入/输出/缓存/总计；网关未返回 usage 时不展示。
+function tokensText(usage){
+  if(!usage)return '-';
+  const {input=0,output=0,cached=0,total=0}=usage;
+  if(!input&&!output&&!cached&&!total)return '-';
+  return `${input}/${output}/${cached}/${total}`;
+}
 function esc(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]))}
 function modeLabel(mode=checkDialogMode){return mode==='stream'?'流式':'非流式'}
 let toastTimer=0;
@@ -586,6 +593,19 @@ function closeCheckDialog(){
   if(settingsModalEl.hidden)document.body.classList.remove('modal-open');
   updateButtons();
 }
+// 作者 long: 汇总本次检测所有结果的 usage；合计输入/输出/缓存/总计，流式与非流式取对应列。
+function usageSummaryText(results,kind){
+  let input=0,output=0,cached=0,total=0,seen=false;
+  (results||[]).forEach(result=>{
+    const probe=kind==='stream'?result.stream:result.nonstream;
+    const usage=probe?.token_usage;
+    if(!usage)return;
+    seen=true;
+    input+=usage.input||0;output+=usage.output||0;cached+=usage.cached||0;total+=usage.total||0;
+  });
+  if(!seen)return '';
+  return `输入 ${input} / 输出 ${output} / 缓存 ${cached} / 总计 ${total}`;
+}
 function resultTextForReport(report,kind){
   const results=report.results||[];
   if(!results.length)return '检测完成，但没有返回模型检测结果。';
@@ -605,6 +625,8 @@ async function setCheckResultReport(report){
   }).length;
   checkStatusEl.textContent=`检测完成 ${okCount}/${results.length}`;
   checkResultMetaEl.textContent=`${report.duration_ms||0}ms`;
+  const usageSummary=usageSummaryText(results,checkDialogMode);
+  if(usageSummary)checkResultMetaEl.textContent+=` · tokens ${usageSummary}`;
   const tested=results.some(result=>(checkDialogMode==='stream'?result.stream:result.nonstream)?.tested);
   dialogResultMetaEl.textContent=tested?'已返回':'本次未执行';
   rawResultMetaEl.textContent=`${report.duration_ms||0}ms`;
@@ -733,7 +755,7 @@ function protocolSummary(item){
   const result=item.results[state.testProtocol];
   if(!result)return {checked:false,ok:false,non:'-',stream:'-',first:'-',total:'-',nonOK:false,streamOK:false,nonTested:false,streamTested:false};
   const non=result.nonstream||{}, stream=result.stream||{};
-  return {checked:true,ok:!!(non.ok||stream.ok),streamOK:!!stream.ok,non:probeText(non),stream:probeText(stream),first:ms(stream.first_text_ms||stream.first_byte_ms||non.first_byte_ms),total:ms(stream.total_ms||non.total_ms),nonOK:!!non.ok,streamOK:!!stream.ok,nonTested:!!non.tested,streamTested:!!stream.tested};
+  return {checked:true,ok:!!(non.ok||stream.ok),streamOK:!!stream.ok,non:probeText(non),stream:probeText(stream),first:ms(stream.first_text_ms||stream.first_byte_ms||non.first_byte_ms),total:ms(stream.total_ms||non.total_ms),tokens:tokensText(stream.tested?stream.token_usage:non.token_usage),nonOK:!!non.ok,streamOK:!!stream.ok,nonTested:!!non.tested,streamTested:!!stream.tested};
 }
 function taskFor(item, protocol){return {root:item.root,protocol,model:item.model}}
 function applyModels(report){
@@ -914,7 +936,7 @@ function render(){
   if(filtered.length)select(activeVisible?state.active:indexMap.get(filtered[0]));
   rowsEl.innerHTML=filtered.map(item=>{
     const i=indexMap.get(item),summary=protocolSummary(item);
-    return `<tr class="${i===state.active?'active':''}" data-index="${i}"><td class="model"><div class="model-cell"><span title="${esc(item.model)}">${esc(item.model)}</span><button class="model-copy" data-copy-index="${i}" title="复制模型 ID" aria-label="复制模型 ID"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div></td><td>${statusCell(summary.nonTested,summary.nonOK,esc(summary.non))}</td><td>${statusCell(summary.streamTested,summary.streamOK,esc(summary.stream))}</td><td class="mono">${esc(summary.first)}</td><td class="mono">${esc(summary.total)}</td><td class="action-cell"><button class="btn row-check" data-check-index="${i}" title="测试当前模型">测试</button></td></tr>`;
+    return `<tr class="${i===state.active?'active':''}" data-index="${i}"><td class="model"><div class="model-cell"><span title="${esc(item.model)}">${esc(item.model)}</span><button class="model-copy" data-copy-index="${i}" title="复制模型 ID" aria-label="复制模型 ID"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div></td><td>${statusCell(summary.nonTested,summary.nonOK,esc(summary.non))}</td><td>${statusCell(summary.streamTested,summary.streamOK,esc(summary.stream))}</td><td class="mono">${esc(summary.first)}</td><td class="mono">${esc(summary.total)}</td><td class="mono tokens-cell" title="输入/输出/缓存/总计">${esc(summary.tokens)}</td><td class="action-cell"><button class="btn row-check" data-check-index="${i}" title="测试当前模型">测试</button></td></tr>`;
   }).join('');
   renderEmptyState(visibleEmptyState(filtered.length),filtered.length===0);
   stats.models.textContent=`模型 ${filtered.length}`;

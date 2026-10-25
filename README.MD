@@ -123,6 +123,8 @@ go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx" --s
 APICHECK_API_KEY="sk-xxx" go run ./cmd/apicheck --base-url "https://example.com/v1"
 ```
 
+表格里的 TOKENS 列格式为 `输入/输出/缓存/总计`（数据来自响应的 `usage` 字段，OpenAI 与 Anthropic 的命名已归一；网关未返回 usage 时显示 `-`）。Web UI 的模型表格与检测弹窗同样展示。
+
 输出 JSON：
 
 ```bash

@@ -105,6 +105,20 @@ type ProbeResult struct {
 	Preview      string `json:"preview,omitempty"`
 	RawResponse  string `json:"raw_response,omitempty"`
 	RawError     string `json:"raw_error,omitempty"`
+	// TokenUsage 是从响应 usage 字段提取的 token 用量；网关未返回时为零值，前端不展示。
+	TokenUsage TokenUsage `json:"token_usage,omitempty"`
+}
+
+// TokenUsage 统一三种协议的 usage 命名：OpenAI 的 prompt/completion tokens
+// 与 Anthropic 的 input/output tokens 归为同一组字段；缓存 token 取两家各自的
+// 缓存命中或缓存写入（OpenAI cached_tokens / Anthropic cache_read+cache_creation）。
+// Total 在上游返回 total_tokens 时直接采用，否则按输入+输出推算。
+type TokenUsage struct {
+	Input      int64 `json:"input,omitempty"`
+	Output     int64 `json:"output,omitempty"`
+	Cached     int64 `json:"cached,omitempty"`
+	Total      int64 `json:"total,omitempty"`
+	FromStream bool  `json:"from_stream,omitempty"`
 }
 
 type TaskSpec struct {
