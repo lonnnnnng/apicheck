@@ -30,9 +30,11 @@ const (
 )
 
 type Config struct {
-	BaseURL                 string
-	APIKey                  string
-	Prompt                  string
+	BaseURL string
+	APIKey  string
+	Prompt  string
+	// SystemPromptPresetID 选择系统提示词预设（见 system_prompt.go）；空或 "none" 表示不发送 system prompt。
+	SystemPromptPresetID    string
 	Protocol                Protocol
 	Mode                    Mode
 	Concurrency             int

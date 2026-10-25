@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"strings"
-	"time"
 
+	"apicheck/internal/apireq"
 	"apicheck/internal/checker"
 	"apicheck/internal/presentation"
 
@@ -15,30 +15,8 @@ type App struct {
 	ctx context.Context
 }
 
-type CheckRequest struct {
-	BaseURL                 string             `json:"base_url"`
-	APIKey                  string             `json:"api_key"`
-	Prompt                  string             `json:"prompt"`
-	Protocol                string             `json:"protocol"`
-	Mode                    string             `json:"mode"`
-	Concurrency             int                `json:"concurrency"`
-	Timeout                 string             `json:"timeout"`
-	StreamFirstTimeout      string             `json:"stream_first_timeout"`
-	StreamIdleTimeout       string             `json:"stream_idle_timeout"`
-	StreamMaxDuration       string             `json:"stream_max_duration"`
-	Filter                  string             `json:"filter"`
-	MaxModels               int                `json:"max_models"`
-	SkipTLSVerify           bool               `json:"skip_tls_verify"`
-	ConnectTimeout          string             `json:"connect_timeout"`
-	OpenAIUASurface         string             `json:"openai_ua_surface"`
-	AnthropicUASurface      string             `json:"anthropic_ua_surface"`
-	OpenAIUserAgent         string             `json:"openai_user_agent"`
-	OpenAIOriginator        string             `json:"openai_originator"`
-	AnthropicUserAgent      string             `json:"anthropic_user_agent"`
-	AnthropicClientPlatform string             `json:"anthropic_client_platform"`
-	LiveEventName           string             `json:"live_event_name"`
-	Tasks                   []checker.TaskSpec `json:"tasks"`
-}
+// CheckRequest 是前端提交给桌面绑定的检测请求，字段与 apireq.Request 完全一致。
+type CheckRequest = apireq.Request
 
 func NewApp() *App {
 	return &App{}
@@ -51,17 +29,17 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) Check(req CheckRequest) (*checker.Report, error) {
 	// 作者 long: 桌面端只把表单参数转成检测核心的 Config，真实协议识别仍统一放在 checker.Run，
 	// 避免 CLI、Web 预览和桌面 App 之间出现三套判断口径。
-	return checker.Run(context.Background(), configFromRequest(req))
+	return checker.Run(context.Background(), apireq.ConfigFrom(req, checker.ClientSurfaceDesktop))
 }
 
 func (a *App) ListModels(req CheckRequest) (*checker.Report, error) {
 	// 作者 long: 获取模型只访问 /models 并生成待检测任务，用户确认模型列表后再触发真实对话探测。
-	return checker.ListModels(context.Background(), configFromRequest(req))
+	return checker.ListModels(context.Background(), apireq.ConfigFrom(req, checker.ClientSurfaceDesktop))
 }
 
 func (a *App) CheckModels(req CheckRequest) (*checker.Report, error) {
 	// 作者 long: 单个检测和批量检测都通过 tasks 明确指定目标，避免重新拉模型列表导致用户筛选结果被刷新。
-	cfg := configFromRequest(req)
+	cfg := apireq.ConfigFrom(req, checker.ClientSurfaceDesktop)
 	if a.ctx != nil && strings.TrimSpace(req.LiveEventName) != "" {
 		eventName := strings.TrimSpace(req.LiveEventName)
 		cfg.Progress = func(event checker.ProgressEvent) {
@@ -69,6 +47,29 @@ func (a *App) CheckModels(req CheckRequest) (*checker.Report, error) {
 		}
 	}
 	return checker.CheckModels(context.Background(), cfg, req.Tasks)
+}
+
+func (a *App) Preview(payload apireq.PreviewPayload) (string, error) {
+	// 作者 long: 预览必须与真实探测逐字节一致，由后端同一套代码生成，前端不再内置协议知识。
+	cfg := apireq.ConfigFrom(payload.Request, checker.ClientSurfaceDesktop)
+	kind := apireq.ParsePreviewKind(payload.Kind)
+	if len(payload.Tasks) > 0 {
+		return checker.Preview(cfg, payload.Tasks[0], payload.Stream, kind)
+	}
+	return checker.ModelListPreview(cfg, kind)
+}
+
+func (a *App) DefaultClientIdentities(req CheckRequest) (map[string]checker.ClientIdentity, error) {
+	// 作者 long: 默认身份含动态版本号与真实 OS 信息，统一由后端下发，避免前端硬编码过期。
+	return checker.DefaultClientIdentities(
+		apireq.ParseClientSurfaceOrDefault(req.OpenAIUASurface, checker.ClientSurfaceDesktop),
+		apireq.ParseClientSurfaceOrDefault(req.AnthropicUASurface, checker.ClientSurfaceDesktop),
+	), nil
+}
+
+// SystemPrompts 返回全部系统提示词预设，供前端渲染切换菜单。
+func (a *App) SystemPrompts() []checker.SystemPromptPreset {
+	return checker.SystemPromptPresets()
 }
 
 func (a *App) RenderMarkdown(text string) (string, error) {
@@ -80,36 +81,6 @@ func (a *App) RenderMarkdown(text string) (string, error) {
 func (a *App) GenerateQRCode(text string) (string, error) {
 	// 作者 long: 连接分享包含 API Key，二维码必须完全在本地生成，不能调用外部图片或二维码服务。
 	return presentation.GenerateQRCodeDataURL(text)
-}
-
-func configFromRequest(req CheckRequest) checker.Config {
-	timeout := parseDurationOrDefault(req.Timeout, 60*time.Second)
-	connectTimeout := parseDurationOrDefault(req.ConnectTimeout, 30*time.Second)
-	streamMaxDuration, disableStreamMax := parseStreamMaxDuration(req.StreamMaxDuration, 10*time.Minute)
-	return checker.Config{
-		BaseURL:                 req.BaseURL,
-		APIKey:                  req.APIKey,
-		Prompt:                  req.Prompt,
-		Protocol:                checker.Protocol(strings.TrimSpace(req.Protocol)),
-		Mode:                    checker.Mode(strings.TrimSpace(req.Mode)),
-		Concurrency:             req.Concurrency,
-		Timeout:                 timeout,
-		ConnectTimeout:          connectTimeout,
-		StreamFirstTimeout:      parseDurationOrDefault(req.StreamFirstTimeout, 60*time.Second),
-		StreamIdleTimeout:       parseDurationOrDefault(req.StreamIdleTimeout, 60*time.Second),
-		StreamMaxDuration:       streamMaxDuration,
-		DisableStreamMax:        disableStreamMax,
-		Filter:                  req.Filter,
-		MaxModels:               req.MaxModels,
-		InsecureSkipVerify:      req.SkipTLSVerify,
-		ClientSurface:           checker.ClientSurfaceDesktop,
-		OpenAIClientSurface:     parseClientSurfaceOrDefault(req.OpenAIUASurface, checker.ClientSurfaceDesktop),
-		AnthropicClientSurface:  parseClientSurfaceOrDefault(req.AnthropicUASurface, checker.ClientSurfaceDesktop),
-		OpenAIUserAgent:         req.OpenAIUserAgent,
-		OpenAIOriginator:        req.OpenAIOriginator,
-		AnthropicUserAgent:      req.AnthropicUserAgent,
-		AnthropicClientPlatform: req.AnthropicClientPlatform,
-	}
 }
 
 func (a *App) Quit() {
@@ -127,43 +98,5 @@ func (a *App) Minimise() {
 func (a *App) ToggleMaximise() {
 	if a.ctx != nil {
 		runtime.WindowToggleMaximise(a.ctx)
-	}
-}
-
-func parseDurationOrDefault(value string, fallback time.Duration) time.Duration {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		return fallback
-	}
-	return parsed
-}
-
-func parseStreamMaxDuration(value string, fallback time.Duration) (time.Duration, bool) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback, false
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		return fallback, false
-	}
-	if parsed == 0 {
-		return 0, true
-	}
-	return parsed, false
-}
-
-func parseClientSurfaceOrDefault(value string, fallback checker.ClientSurface) checker.ClientSurface {
-	switch checker.ClientSurface(strings.ToLower(strings.TrimSpace(value))) {
-	case checker.ClientSurfaceCLI:
-		return checker.ClientSurfaceCLI
-	case checker.ClientSurfaceDesktop:
-		return checker.ClientSurfaceDesktop
-	default:
-		return fallback
 	}
 }

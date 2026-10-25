@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"apicheck/internal/apireq"
 	"apicheck/internal/checker"
 	"apicheck/internal/presentation"
 )
@@ -23,6 +24,7 @@ func main() {
 	var listen string
 	var staticDir string
 	var streamMaxDuration string
+	var strict bool
 	flag.StringVar(&cfg.BaseURL, "base-url", "", "API root URL, for example https://example.com/v1")
 	flag.StringVar(&cfg.APIKey, "api-key", "", "API key, can also be provided by APICHECK_API_KEY")
 	flag.Var((*protocolFlag)(&cfg.Protocol), "protocol", "auto/openai/openai-chat/openai-responses/anthropic/anthropic-messages/all")
@@ -34,18 +36,20 @@ func main() {
 	flag.DurationVar(&cfg.StreamIdleTimeout, "stream-idle-timeout", 60*time.Second, "stream idle timeout")
 	flag.StringVar(&streamMaxDuration, "stream-max-duration", "10m", "stream max duration, 0 means unlimited")
 	flag.StringVar(&cfg.Prompt, "prompt", "", "conversation probe prompt")
+	flag.StringVar(&cfg.SystemPromptPresetID, "system-prompt", "", "system prompt preset: "+strings.Join(checker.SystemPromptIDs(), "/"))
 	flag.StringVar(&cfg.Filter, "filter", "", "only test models containing this text")
 	flag.IntVar(&cfg.MaxModels, "max-models", 0, "max models per discovered source, 0 means unlimited")
 	flag.BoolVar(&cfg.InsecureSkipVerify, "insecure-skip-verify", false, "skip TLS verification for self-signed gateways")
 	flag.Var((*surfaceFlag)(&cfg.OpenAIClientSurface), "openai-ua-surface", "cli/desktop User-Agent surface for OpenAI-compatible requests")
 	flag.Var((*surfaceFlag)(&cfg.AnthropicClientSurface), "anthropic-ua-surface", "cli/desktop User-Agent surface for Anthropic-compatible requests")
+	flag.BoolVar(&strict, "strict", false, "exit with code 1 when any tested probe fails")
 	flag.StringVar(&format, "format", "table", "table/json")
 	flag.StringVar(&output, "output", "", "write output to file")
 	flag.BoolVar(&serve, "serve", false, "start local web UI server")
 	flag.StringVar(&listen, "listen", "127.0.0.1:8787", "web UI listen address")
 	flag.StringVar(&staticDir, "static-dir", "prototype", "directory that contains index.html")
 	flag.Parse()
-	cfg.StreamMaxDuration, cfg.DisableStreamMax = parseStreamMaxDuration(streamMaxDuration, 10*time.Minute)
+	cfg.StreamMaxDuration, cfg.DisableStreamMax = apireq.ParseStreamMaxDuration(streamMaxDuration, 10*time.Minute)
 
 	if serve {
 		if err := runServer(listen, staticDir); err != nil {
@@ -82,30 +86,21 @@ func main() {
 		return
 	}
 	fmt.Println(string(data))
+	if strict && reportHasFailures(report) {
+		os.Exit(1)
+	}
 }
 
-type checkRequest struct {
-	BaseURL                 string             `json:"base_url"`
-	APIKey                  string             `json:"api_key"`
-	Prompt                  string             `json:"prompt"`
-	Protocol                string             `json:"protocol"`
-	Mode                    string             `json:"mode"`
-	Concurrency             int                `json:"concurrency"`
-	Timeout                 string             `json:"timeout"`
-	StreamFirstTimeout      string             `json:"stream_first_timeout"`
-	StreamIdleTimeout       string             `json:"stream_idle_timeout"`
-	StreamMaxDuration       string             `json:"stream_max_duration"`
-	Filter                  string             `json:"filter"`
-	MaxModels               int                `json:"max_models"`
-	SkipTLSVerify           bool               `json:"skip_tls_verify"`
-	ConnectTimeout          string             `json:"connect_timeout"`
-	OpenAIUASurface         string             `json:"openai_ua_surface"`
-	AnthropicUASurface      string             `json:"anthropic_ua_surface"`
-	OpenAIUserAgent         string             `json:"openai_user_agent"`
-	OpenAIOriginator        string             `json:"openai_originator"`
-	AnthropicUserAgent      string             `json:"anthropic_user_agent"`
-	AnthropicClientPlatform string             `json:"anthropic_client_platform"`
-	Tasks                   []checker.TaskSpec `json:"tasks"`
+// reportHasFailures 报告是否存在已执行且失败的探测，供 --strict 判定退出码。
+func reportHasFailures(report *checker.Report) bool {
+	for _, result := range report.Results {
+		for _, probe := range []checker.ProbeResult{result.NonStream, result.Stream} {
+			if probe.Tested && !probe.OK {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type textRequest struct {
@@ -125,12 +120,12 @@ func newServerHandler(staticDir string) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		var req checkRequest
+		var req apireq.Request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		report, err := checker.ListModels(r.Context(), configFromRequest(req))
+		report, err := checker.ListModels(r.Context(), apireq.ConfigFrom(req, checker.ClientSurfaceCLI))
 		writeJSONReport(w, report, err)
 	})
 	mux.HandleFunc("/api/check", func(w http.ResponseWriter, r *http.Request) {
@@ -138,12 +133,12 @@ func newServerHandler(staticDir string) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		var req checkRequest
+		var req apireq.Request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		cfg := configFromRequest(req)
+		cfg := apireq.ConfigFrom(req, checker.ClientSurfaceCLI)
 		var report *checker.Report
 		var err error
 		if len(req.Tasks) > 0 {
@@ -152,6 +147,50 @@ func newServerHandler(staticDir string) http.Handler {
 			report, err = checker.Run(r.Context(), cfg)
 		}
 		writeJSONReport(w, report, err)
+	})
+	mux.HandleFunc("/api/preview", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload apireq.PreviewPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		cfg := apireq.ConfigFrom(payload.Request, checker.ClientSurfaceCLI)
+		kind := apireq.ParsePreviewKind(payload.Kind)
+		var text string
+		var err error
+		if len(payload.Tasks) > 0 {
+			text, err = checker.Preview(cfg, payload.Tasks[0], payload.Stream, kind)
+		} else {
+			text, err = checker.ModelListPreview(cfg, kind)
+		}
+		writeJSONValue(w, map[string]string{"preview": text}, err)
+	})
+	mux.HandleFunc("/api/system-prompts", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSONValue(w, checker.SystemPromptPresets(), nil)
+	})
+	mux.HandleFunc("/api/client-identity", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req apireq.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		identities := checker.DefaultClientIdentities(
+			apireq.ParseClientSurfaceOrDefault(req.OpenAIUASurface, checker.ClientSurfaceCLI),
+			apireq.ParseClientSurfaceOrDefault(req.AnthropicUASurface, checker.ClientSurfaceCLI),
+		)
+		writeJSONValue(w, identities, nil)
 	})
 	mux.HandleFunc("/api/markdown", func(w http.ResponseWriter, r *http.Request) {
 		var req textRequest
@@ -192,35 +231,6 @@ func writeJSONValue(w http.ResponseWriter, value any, err error) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(value)
-}
-
-func configFromRequest(req checkRequest) checker.Config {
-	timeout := parseDurationOrDefault(req.Timeout, 60*time.Second)
-	connectTimeout := parseDurationOrDefault(req.ConnectTimeout, 30*time.Second)
-	streamMaxDuration, disableStreamMax := parseStreamMaxDuration(req.StreamMaxDuration, 10*time.Minute)
-	return checker.Config{
-		BaseURL:                 req.BaseURL,
-		APIKey:                  req.APIKey,
-		Prompt:                  req.Prompt,
-		Protocol:                checker.Protocol(strings.TrimSpace(req.Protocol)),
-		Mode:                    checker.Mode(strings.TrimSpace(req.Mode)),
-		Concurrency:             req.Concurrency,
-		Timeout:                 timeout,
-		ConnectTimeout:          connectTimeout,
-		StreamFirstTimeout:      parseDurationOrDefault(req.StreamFirstTimeout, 60*time.Second),
-		StreamIdleTimeout:       parseDurationOrDefault(req.StreamIdleTimeout, 60*time.Second),
-		StreamMaxDuration:       streamMaxDuration,
-		DisableStreamMax:        disableStreamMax,
-		Filter:                  req.Filter,
-		MaxModels:               req.MaxModels,
-		InsecureSkipVerify:      req.SkipTLSVerify,
-		OpenAIClientSurface:     parseClientSurfaceOrDefault(req.OpenAIUASurface, checker.ClientSurfaceCLI),
-		AnthropicClientSurface:  parseClientSurfaceOrDefault(req.AnthropicUASurface, checker.ClientSurfaceCLI),
-		OpenAIUserAgent:         req.OpenAIUserAgent,
-		OpenAIOriginator:        req.OpenAIOriginator,
-		AnthropicUserAgent:      req.AnthropicUserAgent,
-		AnthropicClientPlatform: req.AnthropicClientPlatform,
-	}
 }
 
 func writeJSONReport(w http.ResponseWriter, report *checker.Report, err error) {
@@ -291,44 +301,6 @@ func (s *surfaceFlag) Set(value string) error {
 	default:
 		return fmt.Errorf("unsupported client surface %q", value)
 	}
-}
-
-func parseClientSurfaceOrDefault(value string, fallback checker.ClientSurface) checker.ClientSurface {
-	switch checker.ClientSurface(strings.ToLower(strings.TrimSpace(value))) {
-	case checker.ClientSurfaceCLI:
-		return checker.ClientSurfaceCLI
-	case checker.ClientSurfaceDesktop:
-		return checker.ClientSurfaceDesktop
-	default:
-		return fallback
-	}
-}
-
-func parseDurationOrDefault(value string, fallback time.Duration) time.Duration {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		return fallback
-	}
-	return parsed
-}
-
-func parseStreamMaxDuration(value string, fallback time.Duration) (time.Duration, bool) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback, false
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil {
-		return fallback, false
-	}
-	if parsed == 0 {
-		return 0, true
-	}
-	return parsed, false
 }
 
 func renderTable(report *checker.Report) string {

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"apicheck/internal/apireq"
+	"apicheck/internal/checker"
 )
 
 func TestAPICheckEndpoint(t *testing.T) {
@@ -185,13 +188,13 @@ func TestAPIModelsThenCheckTasksEndpoint(t *testing.T) {
 }
 
 func TestConfigFromRequestHonorsStreamTimeouts(t *testing.T) {
-	cfg := configFromRequest(checkRequest{
+	cfg := apireq.ConfigFrom(apireq.Request{
 		Timeout:            "9s",
 		ConnectTimeout:     "30s",
 		StreamFirstTimeout: "11s",
 		StreamIdleTimeout:  "12s",
 		StreamMaxDuration:  "0",
-	})
+	}, checker.ClientSurfaceCLI)
 	if cfg.Timeout != 9*time.Second {
 		t.Fatalf("timeout = %s, want 9s", cfg.Timeout)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"apicheck/internal/apireq"
 	"apicheck/internal/checker"
 )
 
@@ -180,13 +181,13 @@ func TestAppHonorsConfiguredUASurfaces(t *testing.T) {
 }
 
 func TestDesktopConfigHonorsStreamTimeouts(t *testing.T) {
-	cfg := configFromRequest(CheckRequest{
+	cfg := apireq.ConfigFrom(CheckRequest{
 		Timeout:            "9s",
 		ConnectTimeout:     "30s",
 		StreamFirstTimeout: "11s",
 		StreamIdleTimeout:  "12s",
 		StreamMaxDuration:  "0",
-	})
+	}, checker.ClientSurfaceDesktop)
 	if cfg.Timeout != 9*time.Second {
 		t.Fatalf("timeout = %s, want 9s", cfg.Timeout)
 	}

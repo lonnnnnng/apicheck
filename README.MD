@@ -101,6 +101,14 @@ go run ./cmd/apicheck \
   --stream-max-duration 10m
 ```
 
+系统提示词预设：
+
+用 `--system-prompt` 模拟真实 coding agent 的系统提示词流量（很多网关会按 system prompt 特征路由或限流，仅用短探测消息探不出这些差异）。可选值：`none`（默认，不发送 system prompt）、`pi`、`codex`、`codex-gpt-5`、`opencode`、`deepseek`、`deepseek-web`。Web UI 与桌面端在“检测提示词”上方和检测弹窗里都可切换。
+
+```bash
+go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx" --system-prompt codex
+```
+
 超时说明：
 
 - `--timeout`：模型列表和非流式请求总超时，默认 `60s`。
@@ -122,6 +130,12 @@ go run ./cmd/apicheck \
   --base-url "https://example.com/v1" \
   --api-key "sk-xxx" \
   --format json
+```
+
+CI / 脚本中可用 `--strict`：只要存在“已执行且失败”的探测就退出码 1，全部通过退出码 0：
+
+```bash
+go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx" --strict
 ```
 
 ## 浏览器预览

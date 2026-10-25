@@ -2,7 +2,6 @@ package checker
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -11,18 +10,24 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	defaultProbePrompt       = "Reply with exactly: pong"
-	defaultRequestTimeout    = 60 * time.Second
-	defaultConnectTimeout    = 30 * time.Second
-	defaultStreamFirstWait   = 60 * time.Second
-	defaultStreamIdleTimeout = 60 * time.Second
-	defaultStreamMaxDuration = 10 * time.Minute
+	defaultProbePrompt          = "Reply with exactly: pong"
+	defaultRequestTimeout       = 60 * time.Second
+	defaultConnectTimeout       = 30 * time.Second
+	defaultStreamFirstWait      = 60 * time.Second
+	defaultStreamIdleTimeout    = 60 * time.Second
+	defaultStreamMaxDuration    = 10 * time.Minute
+	defaultProbeMaxTokens       = 64
+	nonStreamResponseLimitBytes = 2 << 20 // 非流式响应体读取上限，超出部分丢弃并标记截断。
+	streamRawLimitBytes         = 2 << 20 // 流式原始响应累积上限。
+	streamTextLimitBytes        = 1 << 20 // 流式文本预览累积上限。
+	streamTruncatedMarker       = "\n…[truncated]"
 )
 
 func Run(ctx context.Context, cfg Config) (*Report, error) {
@@ -59,9 +64,7 @@ func ListModels(ctx context.Context, cfg Config) (*Report, error) {
 	started := time.Now()
 	client := newHTTPClient(cfg, cfg.Timeout, 0)
 	report := &Report{Roots: roots, Sources: []ModelSource{}, Tasks: []TaskSpec{}, Results: []ModelResult{}, StartedAt: started}
-	for _, root := range roots {
-		report.Sources = append(report.Sources, probeModelSources(ctx, client, cfg, root)...)
-	}
+	report.Sources = probeAllModelSources(ctx, client, cfg, roots)
 	report.Tasks = buildTasks(report.Sources, cfg)
 	report.FinishedAt = time.Now()
 	report.DurationMS = report.FinishedAt.Sub(started).Milliseconds()
@@ -150,6 +153,41 @@ func probeModelSources(ctx context.Context, client *http.Client, cfg Config, roo
 		sources = append(sources, listModels(ctx, client, cfg, root, "anthropic"))
 	}
 	return sources
+}
+
+// probeAllModelSources 并行探测所有 root×authStyle 组合（最多 4 个并发），
+// 但按 root 顺序、每个 root 内 openai 在 anthropic 之前的固定次序输出，保证多次执行结果稳定可对比。
+func probeAllModelSources(ctx context.Context, client *http.Client, cfg Config, roots []string) []ModelSource {
+	type probe struct {
+		root      string
+		authStyle string
+	}
+	var probes []probe
+	for _, root := range roots {
+		if shouldProbeOpenAIModels(cfg.Protocol) {
+			probes = append(probes, probe{root, "openai"})
+		}
+		if shouldProbeAnthropicModels(cfg.Protocol) {
+			probes = append(probes, probe{root, "anthropic"})
+		}
+	}
+	if len(probes) == 0 {
+		return nil
+	}
+	results := make([]ModelSource, len(probes))
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for i := range probes {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			results[i] = listModels(ctx, client, cfg, probes[i].root, probes[i].authStyle)
+		}(i)
+	}
+	wg.Wait()
+	return results
 }
 
 func shouldProbeOpenAIModels(protocol Protocol) bool {
@@ -317,6 +355,16 @@ func runTasks(ctx context.Context, cfg Config, tasks []TaskSpec) []ModelResult {
 	for result := range results {
 		out = append(out, result)
 	}
+	// 按完成序收结果会让同一批次的行序随机波动，排序后保证多次执行可对比。
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Model != out[j].Model {
+			return out[i].Model < out[j].Model
+		}
+		if out[i].Protocol != out[j].Protocol {
+			return out[i].Protocol < out[j].Protocol
+		}
+		return out[i].Root < out[j].Root
+	})
 	return out
 }
 
@@ -363,27 +411,16 @@ func probeConversation(ctx context.Context, client *http.Client, cfg Config, tas
 }
 
 func buildConversationRequest(ctx context.Context, cfg Config, task modelTask, stream bool) (*http.Request, error) {
-	endpoint := conversationEndpoint(task.protocol)
-	body, err := conversationBody(task.protocol, task.model, stream, cfg.Prompt)
+	parts, err := conversationRequestParts(ctx, cfg, task, stream)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, joinURL(task.root, endpoint), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, parts.url, strings.NewReader(parts.body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if stream {
-		req.Header.Set("Accept", "text/event-stream")
-	} else {
-		req.Header.Set("Accept", "application/json")
-	}
-	if task.protocol == ProtocolAnthropicMessages {
-		applyAuthHeaders(req, cfg.APIKey, "anthropic")
-		applyClientHeaders(req, "anthropic", cfg)
-	} else {
-		applyAuthHeaders(req, cfg.APIKey, "openai")
-		applyClientHeaders(req, "openai", cfg)
+	for _, header := range parts.headers {
+		req.Header.Set(header.Name, header.Value)
 	}
 	return req, nil
 }
@@ -402,32 +439,50 @@ func conversationEndpoint(protocol Protocol) string {
 }
 
 func conversationBody(protocol Protocol, model string, stream bool, prompt string) ([]byte, error) {
+	return conversationBodyWithSystem(protocol, model, stream, prompt, "")
+}
+
+// conversationBodyWithSystem 在探测请求中加入可选 system prompt。
+// 三个协议的 system 角色字段名不同（messages[0] / instructions / system），
+// 但语义一致：模拟真实 agent 的系统提示词流量。
+func conversationBodyWithSystem(protocol Protocol, model string, stream bool, prompt string, systemPrompt string) ([]byte, error) {
 	var payload any
 	switch protocol {
 	case ProtocolOpenAIChat:
+		messages := []map[string]string{}
+		if systemPrompt != "" {
+			messages = append(messages, map[string]string{"role": "system", "content": systemPrompt})
+		}
+		messages = append(messages, map[string]string{"role": "user", "content": prompt})
 		payload = map[string]any{
-			"model":  model,
-			"stream": stream,
-			"messages": []map[string]string{
-				{"role": "user", "content": prompt},
-			},
+			"model":    model,
+			"stream":   stream,
+			"messages": messages,
 		}
 	case ProtocolOpenAIResponses:
-		payload = map[string]any{
+		body := map[string]any{
 			"model":             model,
 			"input":             prompt,
-			"max_output_tokens": 8,
+			"max_output_tokens": defaultProbeMaxTokens,
 			"stream":            stream,
 		}
+		if systemPrompt != "" {
+			body["instructions"] = systemPrompt
+		}
+		payload = body
 	case ProtocolAnthropicMessages:
-		payload = map[string]any{
+		body := map[string]any{
 			"model":      model,
-			"max_tokens": 8,
+			"max_tokens": defaultProbeMaxTokens,
 			"stream":     stream,
 			"messages": []map[string]string{
 				{"role": "user", "content": prompt},
 			},
 		}
+		if systemPrompt != "" {
+			body["system"] = systemPrompt
+		}
+		payload = body
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
 	}
@@ -435,13 +490,23 @@ func conversationBody(protocol Protocol, model string, stream bool, prompt strin
 }
 
 func readNonStreamResult(resp *http.Response, protocol Protocol, start time.Time, result *ProbeResult) {
-	body, err := io.ReadAll(resp.Body)
-	result.TotalMS = elapsedMS(start)
-	if err != nil {
+	// 作者 long: 恶意或异常网关可能返回无限长的响应体，这里读到上限即止，
+	// 截断标记拼接在原始响应末尾，便于用户识别。
+	limited := io.LimitReader(resp.Body, nonStreamResponseLimitBytes+1)
+	body, readErr := io.ReadAll(limited)
+	truncated := len(body) > nonStreamResponseLimitBytes
+	if truncated {
+		body = body[:nonStreamResponseLimitBytes]
+	} else if readErr != nil {
+		result.TotalMS = elapsedMS(start)
 		result.ErrorClass = "read_failed"
-		result.ErrorMessage = err.Error()
+		result.ErrorMessage = readErr.Error()
 		return
 	}
+	if truncated {
+		body = append(body, streamTruncatedMarker...)
+	}
+	result.TotalMS = elapsedMS(start)
 	result.RawResponse = trimBody(body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		result.ErrorClass = classifyHTTPError(resp.StatusCode, body)
@@ -463,14 +528,86 @@ type streamReadItem struct {
 	err  error
 }
 
+// streamCapture 跟踪流式探测的原始响应与文本预览，并封顶累积体积：
+// 达上限后丢弃后续写入但置 truncated 标志，终结时在末尾补截断标记。
+type streamCapture struct {
+	raw       strings.Builder
+	text      strings.Builder
+	rawDone   bool
+	textDone  bool
+	rawTrunc  bool
+	textTrunc bool
+}
+
+func (c *streamCapture) writeRawLine(line string) {
+	if c.rawDone {
+		c.rawTrunc = true
+		return
+	}
+	if c.raw.Len()+len(line)+1 > streamRawLimitBytes {
+		c.rawDone = true
+		c.rawTrunc = true
+		return
+	}
+	c.raw.WriteString(line)
+	c.raw.WriteByte('\n')
+}
+
+func (c *streamCapture) writeText(text string) {
+	if c.textDone {
+		if text != "" {
+			c.textTrunc = true
+		}
+		return
+	}
+	if c.text.Len()+len(text) > streamTextLimitBytes {
+		c.textDone = true
+		if text != "" {
+			c.textTrunc = true
+		}
+		return
+	}
+	c.text.WriteString(text)
+}
+
+func (c *streamCapture) writeTextLine(line string) {
+	if line == "" {
+		return
+	}
+	if c.textDone {
+		c.textTrunc = true
+		return
+	}
+	if c.text.Len()+len(line)+1 > streamTextLimitBytes {
+		c.textDone = true
+		c.textTrunc = true
+		return
+	}
+	c.text.WriteString(line)
+	c.text.WriteByte('\n')
+}
+
+func (c *streamCapture) rawString() string {
+	if c.rawTrunc {
+		return c.raw.String() + streamTruncatedMarker + "\n"
+	}
+	return c.raw.String()
+}
+
+func (c *streamCapture) textString() string {
+	if c.textTrunc {
+		return c.text.String() + streamTruncatedMarker + "\n"
+	}
+	return c.text.String()
+}
+
 func readStreamResult(resp *http.Response, task modelTask, start time.Time, cfg Config, result *ProbeResult) {
 	lines := make(chan streamReadItem, 8)
 	done := make(chan struct{})
 	defer close(done)
 	go scanStreamLines(resp.Body, lines, done)
 
-	var rawResponse strings.Builder
-	var textPreview strings.Builder
+	capture := &streamCapture{}
 	var eventData []string
 
 	firstTimer := time.NewTimer(cfg.StreamFirstTimeout)
@@ -492,7 +629,7 @@ func readStreamResult(resp *http.Response, task modelTask, start time.Time, cfg 
 	if cfg.StreamMaxDuration > 0 {
 		remaining := cfg.StreamMaxDuration - time.Since(start)
 		if remaining <= 0 {
-			setStreamTimeoutResult(resp, result, &rawResponse, &textPreview, start, "stream_max_duration", cfg.StreamMaxDuration)
+			setStreamTimeoutResult(resp, result, capture, start, "stream_max_duration", cfg.StreamMaxDuration)
 			return
 		}
 		maxTimer = time.NewTimer(remaining)
@@ -505,13 +642,13 @@ func readStreamResult(resp *http.Response, task modelTask, start time.Time, cfg 
 		select {
 		case item, ok := <-lines:
 			if !ok {
-				finalizeStreamResult(resp, task, start, &rawResponse, &textPreview, &eventData, result, cfg.Progress)
+				finalizeStreamResult(resp, task, start, capture, &eventData, result, cfg.Progress)
 				return
 			}
 			if item.err != nil {
-				handleSSEEvent(task, start, &textPreview, &eventData, result, cfg.Progress)
+				handleSSEEvent(task, start, capture, &eventData, result, cfg.Progress)
 				result.TotalMS = elapsedMS(start)
-				result.RawResponse = trimBody([]byte(rawResponse.String()))
+				result.RawResponse = trimBody([]byte(capture.rawString()))
 				result.ErrorClass = "stream_read_failed"
 				result.ErrorMessage = item.err.Error()
 				return
@@ -521,15 +658,15 @@ func readStreamResult(resp *http.Response, task modelTask, start time.Time, cfg 
 				stopTimer(firstTimer)
 			}
 			resetTimer(idleTimer, cfg.StreamIdleTimeout)
-			processStreamLine(resp, task, start, item.line, &rawResponse, &textPreview, &eventData, result, cfg.Progress)
+			processStreamLine(resp, task, start, item.line, capture, &eventData, result, cfg.Progress)
 		case <-firstTimer.C:
-			setStreamTimeoutResult(resp, result, &rawResponse, &textPreview, start, "stream_first_timeout", cfg.StreamFirstTimeout)
+			setStreamTimeoutResult(resp, result, capture, start, "stream_first_timeout", cfg.StreamFirstTimeout)
 			return
 		case <-idleC:
-			setStreamTimeoutResult(resp, result, &rawResponse, &textPreview, start, "stream_idle_timeout", cfg.StreamIdleTimeout)
+			setStreamTimeoutResult(resp, result, capture, start, "stream_idle_timeout", cfg.StreamIdleTimeout)
 			return
 		case <-maxC:
-			setStreamTimeoutResult(resp, result, &rawResponse, &textPreview, start, "stream_max_duration", cfg.StreamMaxDuration)
+			setStreamTimeoutResult(resp, result, capture, start, "stream_max_duration", cfg.StreamMaxDuration)
 			return
 		}
 	}
@@ -565,11 +702,10 @@ func sendStreamReadItem(done <-chan struct{}, out chan<- streamReadItem, item st
 	}
 }
 
-func processStreamLine(resp *http.Response, task modelTask, start time.Time, line string, rawResponse, textPreview *strings.Builder, eventData *[]string, result *ProbeResult, progress func(ProgressEvent)) {
-	rawResponse.WriteString(line)
-	rawResponse.WriteByte('\n')
+func processStreamLine(resp *http.Response, task modelTask, start time.Time, line string, capture *streamCapture, eventData *[]string, result *ProbeResult, progress func(ProgressEvent)) {
+	capture.writeRawLine(line)
 	if line == "" {
-		handleSSEEvent(task, start, textPreview, eventData, result, progress)
+		handleSSEEvent(task, start, capture, eventData, result, progress)
 		*eventData = nil
 		return
 	}
@@ -580,14 +716,14 @@ func processStreamLine(resp *http.Response, task modelTask, start time.Time, lin
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// 兼容网关在流式探测失败时常直接返回 JSON 错误，而不是 SSE。
 		// 保留这些普通行，才能给用户看到真实的鉴权/模型/端点错误。
-		appendPreviewLine(textPreview, line)
+		capture.writeTextLine(line)
 	}
 }
 
-func finalizeStreamResult(resp *http.Response, task modelTask, start time.Time, rawResponse, textPreview *strings.Builder, eventData *[]string, result *ProbeResult, progress func(ProgressEvent)) {
-	handleSSEEvent(task, start, textPreview, eventData, result, progress)
+func finalizeStreamResult(resp *http.Response, task modelTask, start time.Time, capture *streamCapture, eventData *[]string, result *ProbeResult, progress func(ProgressEvent)) {
+	handleSSEEvent(task, start, capture, eventData, result, progress)
 	result.TotalMS = elapsedMS(start)
-	rawBody := []byte(rawResponse.String())
+	rawBody := []byte(capture.rawString())
 	result.RawResponse = trimBody(rawBody)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		result.ErrorClass = classifyHTTPError(resp.StatusCode, rawBody)
@@ -596,7 +732,7 @@ func finalizeStreamResult(resp *http.Response, task modelTask, start time.Time, 
 		result.RawError = result.RawResponse
 		return
 	}
-	if text := strings.TrimSpace(textPreview.String()); text != "" {
+	if text := strings.TrimSpace(capture.textString()); text != "" {
 		result.Preview = text
 	} else {
 		result.Preview = result.RawResponse
@@ -604,12 +740,12 @@ func finalizeStreamResult(resp *http.Response, task modelTask, start time.Time, 
 	result.OK = true
 }
 
-func setStreamTimeoutResult(resp *http.Response, result *ProbeResult, rawResponse, textPreview *strings.Builder, start time.Time, class string, duration time.Duration) {
+func setStreamTimeoutResult(resp *http.Response, result *ProbeResult, capture *streamCapture, start time.Time, class string, duration time.Duration) {
 	_ = resp.Body.Close()
 	result.TotalMS = elapsedMS(start)
-	result.RawResponse = trimBody([]byte(rawResponse.String()))
+	result.RawResponse = trimBody([]byte(capture.rawString()))
 	result.RawError = result.RawResponse
-	if text := strings.TrimSpace(textPreview.String()); text != "" {
+	if text := strings.TrimSpace(capture.textString()); text != "" {
 		result.Preview = text
 	}
 	result.ErrorClass = class
@@ -647,7 +783,7 @@ func isTimeoutError(err error) bool {
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
-func handleSSEEvent(task modelTask, start time.Time, preview *strings.Builder, eventData *[]string, result *ProbeResult, progress func(ProgressEvent)) {
+func handleSSEEvent(task modelTask, start time.Time, capture *streamCapture, eventData *[]string, result *ProbeResult, progress func(ProgressEvent)) {
 	if len(*eventData) == 0 {
 		return
 	}
@@ -656,7 +792,7 @@ func handleSSEEvent(task modelTask, start time.Time, preview *strings.Builder, e
 		return
 	}
 	if text := extractConversationText(task.protocol, []byte(data)); text != "" {
-		preview.WriteString(text)
+		capture.writeText(text)
 		emitProgress(progress, task, "delta", text, data)
 	}
 	if result.FirstTextMS == 0 && eventHasText(task.protocol, []byte(data)) {
@@ -677,11 +813,6 @@ func emitProgress(progress func(ProgressEvent), task modelTask, kind, text, raw 
 		Text:     text,
 		Raw:      raw,
 	})
-}
-
-func appendPreviewLine(preview *strings.Builder, line string) {
-	preview.WriteString(line)
-	preview.WriteByte('\n')
 }
 
 func elapsedMS(start time.Time) int64 {
