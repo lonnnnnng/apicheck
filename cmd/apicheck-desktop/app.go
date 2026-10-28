@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"apicheck/internal/apireq"
@@ -59,12 +60,13 @@ func (a *App) Preview(payload apireq.PreviewPayload) (string, error) {
 	return checker.ModelListPreview(cfg, kind)
 }
 
-func (a *App) DefaultClientIdentities(req CheckRequest) (map[string]checker.ClientIdentity, error) {
-	// 作者 long: 默认身份含动态版本号与真实 OS 信息，统一由后端下发，避免前端硬编码过期。
-	return checker.DefaultClientIdentities(
-		apireq.ParseClientSurfaceOrDefault(req.OpenAIUASurface, checker.ClientSurfaceDesktop),
-		apireq.ParseClientSurfaceOrDefault(req.AnthropicUASurface, checker.ClientSurfaceDesktop),
-	), nil
+// AgentIdentity 返回某个系统提示词预设配套的 agent 请求头，供前端展示。
+func (a *App) AgentIdentity(presetID string) (checker.AgentIdentity, error) {
+	_, identity, ok := checker.AgentIdentityForPreset(presetID)
+	if !ok {
+		return checker.AgentIdentity{}, fmt.Errorf("unknown preset: %s", presetID)
+	}
+	return identity, nil
 }
 
 // SystemPrompts 返回全部系统提示词预设，供前端渲染切换菜单。

@@ -6,8 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"apicheck/internal/apireq"
 )
 
 func TestPreviewEndpointModelList(t *testing.T) {
@@ -53,36 +51,43 @@ func TestPreviewEndpointConversationTask(t *testing.T) {
 	}
 }
 
-func TestClientIdentityEndpoint(t *testing.T) {
+func TestAgentIdentityEndpoint(t *testing.T) {
 	handler := newServerHandler("../../prototype")
-	body := `{"openai_ua_surface":"cli","anthropic_ua_surface":"desktop"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/client-identity", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/agent-identity", strings.NewReader(`{"system_prompt_preset":"codex"}`))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
-	var identities map[string]struct {
-		Protocol string `json:"protocol"`
-		Headers  []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		} `json:"headers"`
+	var payload struct {
+		Identity struct {
+			OpenAI []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"openai"`
+		} `json:"identity"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &identities); err != nil {
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(identities) != 2 {
-		t.Fatalf("want 2 identities, got %d", len(identities))
-	}
-	found := false
-	for _, header := range identities["anthropic"].Headers {
-		if header.Name == "anthropic-client-platform" && header.Value == "claude_code_remote" {
-			found = true
+	var ua, originator string
+	for _, header := range payload.Identity.OpenAI {
+		switch header.Name {
+		case "User-Agent":
+			ua = header.Value
+		case "originator":
+			originator = header.Value
 		}
 	}
-	if !found {
-		t.Fatal("desktop anthropic identity missing claude_code_remote")
+	if !strings.HasPrefix(ua, "codex_cli_rs/") || originator != "codex_cli_rs" {
+		t.Fatalf("codex identity = %q / %q", ua, originator)
 	}
-	_ = apireq.ParsePreviewKind("post")
+
+	// 未知预设应 404
+	req = httptest.NewRequest(http.MethodPost, "/api/agent-identity", strings.NewReader(`{"system_prompt_preset":"nope"}`))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown preset status = %d", rec.Code)
+	}
 }

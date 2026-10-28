@@ -50,10 +50,6 @@ type Config struct {
 	ClientSurface           ClientSurface
 	OpenAIClientSurface     ClientSurface
 	AnthropicClientSurface  ClientSurface
-	OpenAIUserAgent         string
-	OpenAIOriginator        string
-	AnthropicUserAgent      string
-	AnthropicClientPlatform string
 	Progress                func(ProgressEvent)
 }
 

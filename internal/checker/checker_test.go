@@ -361,7 +361,7 @@ func TestRequestsUseClientUserAgentByProtocolAndSurface(t *testing.T) {
 		"originator=codex_cli_rs",
 		"/v1/chat/completions ua=codex_chatgpt_desktop/",
 		"originator=codex_chatgpt_desktop",
-		"/v1/messages ua=claude-code/" + claudeCodeClientVersion,
+		"/v1/messages ua=claude-cli/" + claudeCodeOAuthVersion,
 		"platform=claude_code_cli",
 	} {
 		if !strings.Contains(joined, want) {

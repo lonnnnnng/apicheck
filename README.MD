@@ -15,7 +15,7 @@ API Checker 是一个用于检测 OpenAI / Anthropic 兼容接口的本地工具
 - 支持自定义检测提示词，并缓存最近一次 `Base URL`、`API Key` 和提示词。
 - 支持请求预览，包含 `curl` 和 POST 原始请求。
 - 支持查看返回正文和完整原始返回，便于排查兼容网关问题。
-- 支持 OpenAI/Codex 与 Anthropic/Claude 的 Desktop / CLI User-Agent 配置。
+- 选择 agent 预设时自动附带该 agent 的真实客户端请求头（pi、codex、opencode），请求头与系统提示词配套切换。
 
 ## 图标设计
 
@@ -106,6 +106,8 @@ go run ./cmd/apicheck \
 用 `--system-prompt` 模拟真实 coding agent 的系统提示词流量（很多网关会按 system prompt 特征路由或限流，仅用短探测消息探不出这些差异）。可选值：`none`（默认，不发送 system prompt）、`pi`、`codex`、`codex-gpt-5`、`opencode`、`deepseek`、`deepseek-web`。Web UI 与桌面端在“检测提示词”上方和检测弹窗里都可切换。
 
 ```bash
+`pi`、`codex`、`opencode` 预设同时内置了从各家源码核对的配套客户端请求头（User-Agent、`originator`、`x-stainless-*` 等），选择预设即整套模拟该 agent 流量；`codex-gpt-5` 与 `deepseek` 系预设只有提示词、不改变请求头。设置面板可查看当前预设每个协议实际发送的请求头。
+
 go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx" --system-prompt codex
 ```
 

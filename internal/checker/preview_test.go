@@ -68,32 +68,24 @@ func TestModelListPreviewCoversBothAuthStyles(t *testing.T) {
 	}
 }
 
-func TestDefaultClientIdentities(t *testing.T) {
-	identities := DefaultClientIdentities(ClientSurfaceCLI, ClientSurfaceDesktop)
-	if len(identities) != 2 {
-		t.Fatalf("want 2 identities, got %d", len(identities))
+func TestAgentIdentityForPreset(t *testing.T) {
+	preset, identity, ok := AgentIdentityForPreset("codex")
+	if !ok || preset.ID != "codex" {
+		t.Fatal("codex preset not found")
 	}
-	openai := identities["openai"]
-	foundUA := false
-	for _, header := range openai.Headers {
-		if header.Name == "User-Agent" {
-			foundUA = true
-			if !strings.Contains(header.Value, "codex_cli_rs") {
-				t.Fatalf("cli surface UA = %q", header.Value)
-			}
+	var ua, originator string
+	for _, header := range identity.OpenAI {
+		switch header.Name {
+		case "User-Agent":
+			ua = header.Value
+		case "originator":
+			originator = header.Value
 		}
 	}
-	if !foundUA {
-		t.Fatal("openai identity missing User-Agent header")
+	if originator != "codex_cli_rs" || !strings.Contains(ua, "codex_cli_rs/") {
+		t.Fatalf("codex identity ua=%q originator=%q", ua, originator)
 	}
-	anthropic := identities["anthropic"]
-	foundPlatform := false
-	for _, header := range anthropic.Headers {
-		if header.Name == "anthropic-client-platform" && header.Value == "claude_code_remote" {
-			foundPlatform = true
-		}
-	}
-	if !foundPlatform {
-		t.Fatal("anthropic identity missing claude_code_remote platform header")
+	if _, identity, ok := AgentIdentityForPreset("deepseek"); ok && len(identity.OpenAI)+len(identity.Anthropic) > 0 {
+		t.Fatal("deepseek should have no agent headers")
 	}
 }

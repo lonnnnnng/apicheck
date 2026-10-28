@@ -176,21 +176,24 @@ func newServerHandler(staticDir string) http.Handler {
 		}
 		writeJSONValue(w, checker.SystemPromptPresets(), nil)
 	})
-	mux.HandleFunc("/api/client-identity", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/agent-identity", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		var req apireq.Request
+		var req struct {
+			SystemPromptPreset string `json:"system_prompt_preset"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		identities := checker.DefaultClientIdentities(
-			apireq.ParseClientSurfaceOrDefault(req.OpenAIUASurface, checker.ClientSurfaceCLI),
-			apireq.ParseClientSurfaceOrDefault(req.AnthropicUASurface, checker.ClientSurfaceCLI),
-		)
-		writeJSONValue(w, identities, nil)
+		preset, identity, ok := checker.AgentIdentityForPreset(req.SystemPromptPreset)
+		if !ok {
+			http.Error(w, "unknown preset", http.StatusNotFound)
+			return
+		}
+		writeJSONValue(w, map[string]any{"preset": preset, "identity": identity}, nil)
 	})
 	mux.HandleFunc("/api/markdown", func(w http.ResponseWriter, r *http.Request) {
 		var req textRequest

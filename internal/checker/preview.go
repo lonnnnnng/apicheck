@@ -253,26 +253,3 @@ func previewPostGET(request PreviewRequest) string {
 	}
 	return builder.String()
 }
-
-// ClientIdentity 是某一协议默认客户端身份的快照，供设置表单展示。
-type ClientIdentity struct {
-	Protocol string          `json:"protocol"`
-	Headers  []PreviewHeader `json:"headers"`
-}
-
-// DefaultClientIdentities 返回 openai 与 anthropic 两种协议在指定 surface 下的
-// 默认请求身份（User-Agent、originator / anthropic-client-platform）。
-// 表单可据此展示“默认值是什么”，不再由前端硬编码版本号。
-func DefaultClientIdentities(openAISurface, anthropicSurface ClientSurface) map[string]ClientIdentity {
-	cfg := Config{OpenAIClientSurface: openAISurface, AnthropicClientSurface: anthropicSurface}
-	identities := map[string]ClientIdentity{}
-	for _, authStyle := range []string{"openai", "anthropic"} {
-		headers := clientHeaders(authStyle, cfg)
-		previewHeaders := make([]PreviewHeader, 0, len(headers))
-		for _, header := range headers {
-			previewHeaders = append(previewHeaders, PreviewHeader{Name: header.name, Value: header.value})
-		}
-		identities[authStyle] = ClientIdentity{Protocol: authStyle, Headers: previewHeaders}
-	}
-	return identities
-}

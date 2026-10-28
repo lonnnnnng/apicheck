@@ -171,7 +171,7 @@ func TestAppHonorsConfiguredUASurfaces(t *testing.T) {
 	for _, want := range []string{
 		"/v1/chat/completions ua=codex_cli_rs/",
 		"originator=codex_cli_rs",
-		"/v1/messages ua=claude-code/",
+		"/v1/messages ua=claude-cli/",
 		"platform=claude_code_cli",
 	} {
 		if !strings.Contains(joined, want) {

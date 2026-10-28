@@ -28,10 +28,6 @@ type Request struct {
 	ConnectTimeout          string             `json:"connect_timeout"`
 	OpenAIUASurface         string             `json:"openai_ua_surface"`
 	AnthropicUASurface      string             `json:"anthropic_ua_surface"`
-	OpenAIUserAgent         string             `json:"openai_user_agent"`
-	OpenAIOriginator        string             `json:"openai_originator"`
-	AnthropicUserAgent      string             `json:"anthropic_user_agent"`
-	AnthropicClientPlatform string             `json:"anthropic_client_platform"`
 	LiveEventName           string             `json:"live_event_name"`
 	Tasks                   []checker.TaskSpec `json:"tasks"`
 }
@@ -76,10 +72,6 @@ func ConfigFrom(req Request, defaultSurface checker.ClientSurface) checker.Confi
 		ClientSurface:           defaultSurface,
 		OpenAIClientSurface:     ParseClientSurfaceOrDefault(req.OpenAIUASurface, defaultSurface),
 		AnthropicClientSurface:  ParseClientSurfaceOrDefault(req.AnthropicUASurface, defaultSurface),
-		OpenAIUserAgent:         req.OpenAIUserAgent,
-		OpenAIOriginator:        req.OpenAIOriginator,
-		AnthropicUserAgent:      req.AnthropicUserAgent,
-		AnthropicClientPlatform: req.AnthropicClientPlatform,
 	}
 }
 
