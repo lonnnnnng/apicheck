@@ -866,11 +866,13 @@ async function refreshAgentIdentity(){
     if(seq===agentIdentitySeq)agentIdentityHeadersEl.textContent='加载失败 · '+(error.message||error);
   }
 }
-function applyAgentIdentity(identity){
+function applyAgentIdentity(payload){
+  // 作者 long: Wails 通道返回 {openai,anthropic}，web 通道返回 {preset,identity:{openai,anthropic}}，两者兼容。
+  const identity=(payload?.identity??payload)||{};
   const family=state.agentIdentityView==='anthropic'?'anthropic':'openai';
-  const headers=identity?.identity?.[family]||[];
+  const headers=identity[family]||[];
   if(!headers.length){
-    agentIdentityHeadersEl.textContent='当前预设不模拟 Agent 身份，探测使用本工具默认身份。';
+    agentIdentityHeadersEl.textContent='当前预设无请求头可显示。';
     return;
   }
   agentIdentityHeadersEl.textContent=headers.map(header=>`${header.name}: ${header.value}`).join('\n');
