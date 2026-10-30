@@ -129,13 +129,34 @@ func agentIdentityByID(id string) map[string][]PreviewHeader {
 }
 
 // AgentIdentityForPreset 返回某个系统提示词预设配套的请求头（含展示名）。
+// 预设没有专属请求头时返回本工具的默认身份，保证前端总能展示探测实际
+// 发送的头，而不是留空。
 func AgentIdentityForPreset(id string) (SystemPromptPreset, AgentIdentity, bool) {
 	preset, ok := SystemPromptByID(id)
 	if !ok {
 		return SystemPromptPreset{}, AgentIdentity{}, false
 	}
 	headers := agentIdentityByID(preset.ID)
+	if headers == nil {
+		headers = defaultIdentityHeaders()
+	}
 	return preset, AgentIdentity{OpenAI: headers["openai"], Anthropic: headers["anthropic"]}, true
+}
+
+// defaultIdentityHeaders 是未选 agent 预设时探测请求实际发送的头，
+// 与 clientHeaders 的默认分支保持一致。
+func defaultIdentityHeaders() map[string][]PreviewHeader {
+	originator := codexOriginator(ClientSurfaceCLI)
+	return map[string][]PreviewHeader{
+		"openai": {
+			{"User-Agent", codexUserAgent(originator)},
+			{"originator", originator},
+		},
+		"anthropic": {
+			{"User-Agent", claudeCodeUserAgent()},
+			{"anthropic-client-platform", claudeCodeClientPlatform(ClientSurfaceCLI)},
+		},
+	}
 }
 
 // AgentIdentityPreviews 返回全部带配套请求头的预设，供前端展示与文档。

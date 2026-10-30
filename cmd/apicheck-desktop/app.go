@@ -60,7 +60,8 @@ func (a *App) Preview(payload apireq.PreviewPayload) (string, error) {
 	return checker.ModelListPreview(cfg, kind)
 }
 
-// AgentIdentity 返回某个系统提示词预设配套的 agent 请求头，供前端展示。
+// AgentIdentity 返回某个系统提示词预设配套的 agent 请求头（无专属头时为
+// 默认身份），供设置面板展示探测实际发送的请求头。
 func (a *App) AgentIdentity(presetID string) (checker.AgentIdentity, error) {
 	_, identity, ok := checker.AgentIdentityForPreset(presetID)
 	if !ok {

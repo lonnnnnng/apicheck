@@ -85,7 +85,12 @@ func TestAgentIdentityForPreset(t *testing.T) {
 	if originator != "codex_cli_rs" || !strings.Contains(ua, "codex_cli_rs/") {
 		t.Fatalf("codex identity ua=%q originator=%q", ua, originator)
 	}
-	if _, identity, ok := AgentIdentityForPreset("deepseek"); ok && len(identity.OpenAI)+len(identity.Anthropic) > 0 {
-		t.Fatal("deepseek should have no agent headers")
+	// deepseek 无专属头时应回落到默认身份（仍展示实际发送的头）。
+	_, identity, ok = AgentIdentityForPreset("deepseek")
+	if !ok || len(identity.OpenAI) == 0 || len(identity.Anthropic) == 0 {
+		t.Fatal("deepseek should fall back to default identity headers")
+	}
+	if identity.OpenAI[0].Name != "User-Agent" || identity.Anthropic[0].Name != "User-Agent" {
+		t.Fatalf("default identity headers wrong: %+v %+v", identity.OpenAI, identity.Anthropic)
 	}
 }
