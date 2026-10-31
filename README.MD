@@ -105,11 +105,13 @@ go run ./cmd/apicheck \
 
 用 `--system-prompt` 模拟真实 coding agent 的系统提示词流量（很多网关会按 system prompt 特征路由或限流，仅用短探测消息探不出这些差异）。可选值：`none`（默认，不发送 system prompt）、`pi`、`codex`、`codex-gpt-5`、`opencode`、`deepseek`、`deepseek-web`。Web UI 与桌面端在“检测提示词”上方和检测弹窗里都可切换。
 
-```bash
 `pi`、`codex`、`opencode` 预设同时内置了从各家源码核对的配套客户端请求头（User-Agent、`originator`、`x-stainless-*` 等），选择预设即整套模拟该 agent 流量；`codex-gpt-5` 与 `deepseek` 系预设只有提示词、不改变请求头。设置面板可查看当前预设每个协议实际发送的请求头。
 
+```bash
 go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx" --system-prompt codex
 ```
+
+失败原因说明：探测失败时，表格行下方会补一行缩进的 `↳` 说明，输出可读的错误原因（多层嵌套的网关错误会被拍平成“上游错误码：403 → 10605 + 上游详情 JSON”）。流式请求即使 HTTP 200，只要响应里出现 `response.failed`、`response.incomplete` 或 `error` 事件，也会判定为失败并显示原因，而不是把整段 SSE 原文当成成功响应。
 
 超时说明：
 

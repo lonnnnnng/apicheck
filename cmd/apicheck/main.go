@@ -349,9 +349,42 @@ func renderTable(report *checker.Report) string {
 			tokens = renderTokens(result.Stream)
 		}
 		fmt.Fprintf(&builder, "%-31s %-21s %-16s %-16s %-15s %-15s %s\n", truncate(result.Model, 31), result.Protocol, non, stream, first, total, tokens)
+		for _, message := range probeMessages(result) {
+			builder.WriteString(message + "\n")
+		}
 	}
 	fmt.Fprintf(&builder, "\nduration: %dms\n", report.DurationMS)
 	return builder.String()
+}
+
+// probeMessages 收集失败探测的可读错误信息，以缩进行的形式排在表格行下方。
+func probeMessages(result checker.ModelResult) []string {
+	probes := []struct {
+		label string
+		probe checker.ProbeResult
+	}{
+		{"nonstream", result.NonStream},
+		{"stream", result.Stream},
+	}
+	var messages []string
+	for _, entry := range probes {
+		if !entry.probe.Tested || entry.probe.OK {
+			continue
+		}
+		message := strings.TrimSpace(entry.probe.ErrorMessage)
+		if message == "" {
+			continue
+		}
+		messages = append(messages, fmt.Sprintf("  ↳ %s: %s", entry.label, collapseWhitespace(message)))
+	}
+	return messages
+}
+
+// collapseWhitespace 把多行错误信息压成单行，避免打断表格对齐。
+func collapseWhitespace(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\n", " | ")
+	return strings.Join(strings.Fields(text), " ")
 }
 
 func renderProbe(result checker.ProbeResult) string {

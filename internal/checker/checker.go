@@ -510,7 +510,7 @@ func readNonStreamResult(resp *http.Response, protocol Protocol, start time.Time
 	result.RawResponse = trimBody(body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		result.ErrorClass = classifyHTTPError(resp.StatusCode, body)
-		result.ErrorMessage = extractErrorMessage(body)
+		result.ErrorMessage = sanitizeErrorMessage(extractErrorMessage(body))
 		result.Preview = result.ErrorMessage
 		result.RawError = result.RawResponse
 		return
@@ -538,6 +538,28 @@ type streamCapture struct {
 	textDone  bool
 	rawTrunc  bool
 	textTrunc bool
+	// 流式响应可能以 HTTP 200 开始，最后用 response.failed / error 事件宣告失败。
+	// 这种失败不能当成成功，所以单独记录事件里的错误码与错误信息。
+	errSeen bool
+	errCode string
+	errMsg  string
+}
+
+func (c *streamCapture) recordEventError(code, message string) {
+	if code == "" && message == "" {
+		return
+	}
+	if message != "" {
+		c.errMsg = message
+	}
+	if code != "" {
+		c.errCode = code
+	}
+	c.errSeen = true
+}
+
+func (c *streamCapture) eventError() (string, string, bool) {
+	return c.errCode, c.errMsg, c.errSeen
 }
 
 func (c *streamCapture) writeRawLine(line string) {
@@ -728,14 +750,29 @@ func finalizeStreamResult(resp *http.Response, task modelTask, start time.Time, 
 	result.RawResponse = trimBody(rawBody)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		result.ErrorClass = classifyHTTPError(resp.StatusCode, rawBody)
-		result.ErrorMessage = extractErrorMessage(rawBody)
+		result.ErrorMessage = sanitizeErrorMessage(extractErrorMessage(rawBody))
 		result.Preview = result.ErrorMessage
+		result.RawError = result.RawResponse
+		return
+	}
+	// HTTP 200 + response.failed（或 anthropic error 事件）属于失败：
+	// 网关先握手成功，再把上游错误塞进流里，这时不能报成功。
+	if code, message, failed := capture.eventError(); failed {
+		result.ErrorClass = classifyStreamEventError(code, message)
+		result.ErrorMessage = sanitizeErrorMessage(message)
+		if text := strings.TrimSpace(capture.textString()); text != "" {
+			result.Preview = text
+		} else {
+			result.Preview = result.ErrorMessage
+		}
 		result.RawError = result.RawResponse
 		return
 	}
 	if text := strings.TrimSpace(capture.textString()); text != "" {
 		result.Preview = text
-	} else {
+	} else if !looksLikeEventStream(capture.rawString()) {
+		// 网关可能对 stream=true 直接回一段普通 JSON；这段内容当预览更有用。
+		// 真正的 SSE 原始数据只留在 raw_response 里，避免整段事件流灌进预览区。
 		result.Preview = result.RawResponse
 	}
 	result.OK = true
@@ -803,6 +840,9 @@ func handleSSEEvent(task modelTask, start time.Time, capture *streamCapture, eve
 	// anthropic 的 message_delta），每次覆盖写入即可拿到最终值。
 	if usage := extractTokenUsage(task.protocol, []byte(data), true); usage != (TokenUsage{}) {
 		result.TokenUsage = usage
+	}
+	if code, message, failed := extractStreamEventError([]byte(data)); failed {
+		capture.recordEventError(code, message)
 	}
 }
 
@@ -1055,6 +1095,199 @@ func extractErrorMessage(body []byte) string {
 
 func compactPreview(body []byte) string {
 	return strings.Join(strings.Fields(trimBody(body)), " ")
+}
+
+// extractStreamEventError 识别流式响应里的失败事件。
+// 网关常见形态：
+//   - openai-responses: {"type":"response.failed","response":{"error":{...}}}
+//   - openai-responses: {"type":"error","error":{...}}
+//   - anthropic-messages: {"type":"error","error":{"type":"overloaded_error","message":...}}
+//   - openai-chat:      {"error":{"message":...}}
+func extractStreamEventError(body []byte) (string, string, bool) {
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return "", "", false
+	}
+	if code, message, ok := errorObjectFields(payload["error"]); ok {
+		return code, message, true
+	}
+	switch stringField(payload, "type") {
+	case "response.failed":
+		response, _ := payload["response"].(map[string]any)
+		if code, message, ok := errorObjectFields(response["error"]); ok {
+			return code, message, true
+		}
+		return "", "", false
+	case "response.incomplete":
+		response, _ := payload["response"].(map[string]any)
+		details, _ := response["incomplete_details"].(map[string]any)
+		reason := stringField(details, "reason")
+		if reason == "" {
+			return "", "", false
+		}
+		return "incomplete", "响应不完整：" + reason, true
+	}
+	return "", "", false
+}
+
+func errorObjectFields(value any) (string, string, bool) {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return "", "", false
+	}
+	code := firstNonEmptyString(stringField(object, "code"), stringField(object, "type"), stringField(object, "status"))
+	message := firstNonEmptyString(stringField(object, "message"), stringField(object, "detail"), stringField(object, "description"))
+	if code == "" && message == "" {
+		return "", "", false
+	}
+	return code, message, true
+}
+
+// classifyStreamEventError 把流式失败事件的错误码/错误信息归一成和 HTTP 错误一致的分类。
+func classifyStreamEventError(code, message string) string {
+	switch strings.TrimSpace(code) {
+	case "400":
+		return "invalid_request"
+	case "401", "403":
+		return "auth_failed"
+	case "404":
+		return "endpoint_not_found"
+	case "429":
+		return "rate_limited"
+	case "500", "502", "503", "504":
+		return "server_error"
+	}
+	lower := strings.ToLower(code + " " + message)
+	switch {
+	case containsAny(lower, "rate limit", "rate_limit", "too many requests", "quota", "overloaded", "排队", "限流", "资源不足", "resource_limit"):
+		return "rate_limited"
+	case containsAny(lower, "unauthorized", "invalid api key", "authentication", "permission"):
+		return "auth_failed"
+	case containsAny(lower, "model not found", "no such model", "not found"):
+		return "endpoint_not_found"
+	case containsAny(lower, "timeout", "timed out", "internal", "unavailable"):
+		return "server_error"
+	case containsAny(lower, "invalid", "unsupported", "bad request"):
+		return "invalid_request"
+	}
+	if trimmed := strings.TrimSpace(code); trimmed != "" {
+		return trimmed
+	}
+	return "stream_error"
+}
+
+func containsAny(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// looksLikeEventStream 判断原始响应是不是 SSE 事件流。
+// 真正的 SSE 不该当作对话内容展示，只保留在原始数据里。
+func looksLikeEventStream(raw string) bool {
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		return strings.HasPrefix(trimmed, "event:") || strings.HasPrefix(trimmed, "data:") || strings.HasPrefix(trimmed, "id:") || trimmed == ":"
+	}
+	return false
+}
+
+// errorMessageLimitRunes 限制错误信息长度，避免上游把整段 JSON 灌进界面。
+const errorMessageLimitRunes = 1200
+
+// sanitizeErrorMessage 把网关层层套娃的 JSON 错误信息压平成人类可读文本。
+// 上游常见形态："上游排队中…上游详情：{\"code\":\"403\",\"message\":\"{\\\"code\\\":\\\"10605\\\"…}\"}"。
+func sanitizeErrorMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return ""
+	}
+	head, codes, detail := flattenErrorMessage(message)
+	parts := []string{}
+	if head != "" {
+		parts = append(parts, head)
+	}
+	if len(codes) > 0 {
+		parts = append(parts, "上游错误码："+strings.Join(codes, " → "))
+	}
+	if detail != "" {
+		label := "上游详情："
+		if strings.HasSuffix(head, "：") || strings.HasSuffix(head, ":") {
+			label = ""
+		}
+		parts = append(parts, label+detail)
+	}
+	out := strings.Join(parts, "\n")
+	if strings.TrimSpace(out) == "" {
+		out = message
+	}
+	return truncateErrorMessage(out)
+}
+
+// flattenErrorMessage 沿 message 字段剥洋葱：外层人读文本保留为 head，
+// 内层错误码按层级收集，最内层可读信息作为 detail。
+func flattenErrorMessage(message string) (head string, codes []string, detail string) {
+	current := strings.TrimSpace(message)
+	head = current
+	for depth := 0; depth < 5; depth++ {
+		index := strings.Index(current, "{")
+		if index < 0 {
+			break
+		}
+		var payload map[string]any
+		if json.Unmarshal([]byte(current[index:]), &payload) != nil {
+			break
+		}
+		code, inner, ok := errorObjectFields(payload)
+		if !ok {
+			break
+		}
+		if code != "" {
+			codes = append(codes, code)
+		}
+		if depth == 0 {
+			head = strings.TrimSpace(current[:index])
+		}
+		if inner == "" {
+			break
+		}
+		if json.Valid([]byte(inner)) && strings.Contains(inner, "{") {
+			current = inner
+			continue
+		}
+		detail = inner
+		break
+	}
+	if detail == "" && len(codes) > 0 && json.Valid([]byte(current)) {
+		detail = compactPreview([]byte(current))
+	}
+	if head == "" && detail == "" && len(codes) == 0 {
+		head = message
+	}
+	return head, codes, detail
+}
+
+func truncateErrorMessage(message string) string {
+	runes := []rune(message)
+	if len(runes) <= errorMessageLimitRunes {
+		return message
+	}
+	return string(runes[:errorMessageLimitRunes]) + "…（错误信息已截断）"
 }
 
 func trimBody(body []byte) string {

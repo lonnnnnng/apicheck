@@ -119,7 +119,7 @@ func agentIdentityByID(id string) map[string][]PreviewHeader {
 		}
 	case "opencode":
 		return map[string][]PreviewHeader{
-			"openai":  {{"User-Agent", "opencode/" + opencodeClientVersion}},
+			"openai":    {{"User-Agent", "opencode/" + opencodeClientVersion}},
 			"anthropic": {{"User-Agent", "opencode/" + opencodeClientVersion}},
 		}
 	default:

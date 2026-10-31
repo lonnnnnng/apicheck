@@ -11,25 +11,25 @@ import (
 
 // Request 是前端提交给检测入口的统一请求体，JSON 字段与页面 checkRequest 一一对应。
 type Request struct {
-	BaseURL                 string             `json:"base_url"`
-	APIKey                  string             `json:"api_key"`
-	Prompt                  string             `json:"prompt"`
-	SystemPromptPresetID    string             `json:"system_prompt_preset"`
-	Protocol                string             `json:"protocol"`
-	Mode                    string             `json:"mode"`
-	Concurrency             int                `json:"concurrency"`
-	Timeout                 string             `json:"timeout"`
-	StreamFirstTimeout      string             `json:"stream_first_timeout"`
-	StreamIdleTimeout       string             `json:"stream_idle_timeout"`
-	StreamMaxDuration       string             `json:"stream_max_duration"`
-	Filter                  string             `json:"filter"`
-	MaxModels               int                `json:"max_models"`
-	SkipTLSVerify           bool               `json:"skip_tls_verify"`
-	ConnectTimeout          string             `json:"connect_timeout"`
-	OpenAIUASurface         string             `json:"openai_ua_surface"`
-	AnthropicUASurface      string             `json:"anthropic_ua_surface"`
-	LiveEventName           string             `json:"live_event_name"`
-	Tasks                   []checker.TaskSpec `json:"tasks"`
+	BaseURL              string             `json:"base_url"`
+	APIKey               string             `json:"api_key"`
+	Prompt               string             `json:"prompt"`
+	SystemPromptPresetID string             `json:"system_prompt_preset"`
+	Protocol             string             `json:"protocol"`
+	Mode                 string             `json:"mode"`
+	Concurrency          int                `json:"concurrency"`
+	Timeout              string             `json:"timeout"`
+	StreamFirstTimeout   string             `json:"stream_first_timeout"`
+	StreamIdleTimeout    string             `json:"stream_idle_timeout"`
+	StreamMaxDuration    string             `json:"stream_max_duration"`
+	Filter               string             `json:"filter"`
+	MaxModels            int                `json:"max_models"`
+	SkipTLSVerify        bool               `json:"skip_tls_verify"`
+	ConnectTimeout       string             `json:"connect_timeout"`
+	OpenAIUASurface      string             `json:"openai_ua_surface"`
+	AnthropicUASurface   string             `json:"anthropic_ua_surface"`
+	LiveEventName        string             `json:"live_event_name"`
+	Tasks                []checker.TaskSpec `json:"tasks"`
 }
 
 // PreviewPayload 在 Request 基础上附加预览专用字段，供 /api/preview 与桌面 Preview 绑定使用。
@@ -53,25 +53,25 @@ func ParsePreviewKind(kind string) checker.PreviewKind {
 func ConfigFrom(req Request, defaultSurface checker.ClientSurface) checker.Config {
 	streamMaxDuration, disableStreamMax := ParseStreamMaxDuration(req.StreamMaxDuration, 10*time.Minute)
 	return checker.Config{
-		BaseURL:                 req.BaseURL,
-		APIKey:                  req.APIKey,
-		Prompt:                  req.Prompt,
-		SystemPromptPresetID:    strings.TrimSpace(req.SystemPromptPresetID),
-		Protocol:                checker.Protocol(strings.TrimSpace(req.Protocol)),
-		Mode:                    checker.Mode(strings.TrimSpace(req.Mode)),
-		Concurrency:             req.Concurrency,
-		Timeout:                 ParseDurationOrDefault(req.Timeout, 60*time.Second),
-		ConnectTimeout:          ParseDurationOrDefault(req.ConnectTimeout, 30*time.Second),
-		StreamFirstTimeout:      ParseDurationOrDefault(req.StreamFirstTimeout, 60*time.Second),
-		StreamIdleTimeout:       ParseDurationOrDefault(req.StreamIdleTimeout, 60*time.Second),
-		StreamMaxDuration:       streamMaxDuration,
-		DisableStreamMax:        disableStreamMax,
-		Filter:                  req.Filter,
-		MaxModels:               req.MaxModels,
-		InsecureSkipVerify:      req.SkipTLSVerify,
-		ClientSurface:           defaultSurface,
-		OpenAIClientSurface:     ParseClientSurfaceOrDefault(req.OpenAIUASurface, defaultSurface),
-		AnthropicClientSurface:  ParseClientSurfaceOrDefault(req.AnthropicUASurface, defaultSurface),
+		BaseURL:                req.BaseURL,
+		APIKey:                 req.APIKey,
+		Prompt:                 req.Prompt,
+		SystemPromptPresetID:   strings.TrimSpace(req.SystemPromptPresetID),
+		Protocol:               checker.Protocol(strings.TrimSpace(req.Protocol)),
+		Mode:                   checker.Mode(strings.TrimSpace(req.Mode)),
+		Concurrency:            req.Concurrency,
+		Timeout:                ParseDurationOrDefault(req.Timeout, 60*time.Second),
+		ConnectTimeout:         ParseDurationOrDefault(req.ConnectTimeout, 30*time.Second),
+		StreamFirstTimeout:     ParseDurationOrDefault(req.StreamFirstTimeout, 60*time.Second),
+		StreamIdleTimeout:      ParseDurationOrDefault(req.StreamIdleTimeout, 60*time.Second),
+		StreamMaxDuration:      streamMaxDuration,
+		DisableStreamMax:       disableStreamMax,
+		Filter:                 req.Filter,
+		MaxModels:              req.MaxModels,
+		InsecureSkipVerify:     req.SkipTLSVerify,
+		ClientSurface:          defaultSurface,
+		OpenAIClientSurface:    ParseClientSurfaceOrDefault(req.OpenAIUASurface, defaultSurface),
+		AnthropicClientSurface: ParseClientSurfaceOrDefault(req.AnthropicUASurface, defaultSurface),
 	}
 }
 

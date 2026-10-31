@@ -254,3 +254,41 @@ func TestPresentationEndpoints(t *testing.T) {
 		t.Fatalf("QR response status=%d payload prefix=%q", qrResp.StatusCode, qrPayload.DataURL[:min(len(qrPayload.DataURL), 32)])
 	}
 }
+
+// TestRenderTableShowsReadableErrorMessage 表格行下方应输出可读错误信息（而非只给 error_class）。
+func TestRenderTableShowsReadableErrorMessage(t *testing.T) {
+	report := checker.Report{
+		Roots:      []string{"https://example.com/v1"},
+		DurationMS: 12,
+		Results: []checker.ModelResult{{
+			Model:    "DeepSeek-Flash",
+			Protocol: "openai-responses",
+			Stream: checker.ProbeResult{
+				Tested:       true,
+				OK:           false,
+				HTTPStatus:   200,
+				ErrorClass:   "rate_limited",
+				ErrorMessage: "上游排队中（10605 / RESOURCE_LIMIT）\n上游错误码：403 → 10605",
+			},
+		}},
+	}
+	table := renderTable(&report)
+	if !strings.Contains(table, "fail 200/rate_limited") {
+		t.Fatalf("missing failure cell:\n%s", table)
+	}
+	if !strings.Contains(table, "↳ stream: 上游排队中（10605 / RESOURCE_LIMIT） | 上游错误码：403 → 10605") {
+		t.Fatalf("missing readable error line:\n%s", table)
+	}
+}
+
+// TestRenderTableOmitsMessagesForSuccess 成功的探测不应输出额外错误行。
+func TestRenderTableOmitsMessagesForSuccess(t *testing.T) {
+	report := checker.Report{Results: []checker.ModelResult{{
+		Model:     "gpt-4o-mini",
+		Protocol:  "openai-chat",
+		NonStream: checker.ProbeResult{Tested: true, OK: true},
+	}}}
+	if table := renderTable(&report); strings.Contains(table, "↳") {
+		t.Fatalf("unexpected error line:\n%s", table)
+	}
+}

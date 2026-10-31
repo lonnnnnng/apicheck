@@ -34,23 +34,23 @@ type Config struct {
 	APIKey  string
 	Prompt  string
 	// SystemPromptPresetID 选择系统提示词预设（见 system_prompt.go）；空或 "none" 表示不发送 system prompt。
-	SystemPromptPresetID    string
-	Protocol                Protocol
-	Mode                    Mode
-	Concurrency             int
-	Timeout                 time.Duration
-	ConnectTimeout          time.Duration
-	StreamFirstTimeout      time.Duration
-	StreamIdleTimeout       time.Duration
-	StreamMaxDuration       time.Duration
-	DisableStreamMax        bool
-	Filter                  string
-	MaxModels               int
-	InsecureSkipVerify      bool
-	ClientSurface           ClientSurface
-	OpenAIClientSurface     ClientSurface
-	AnthropicClientSurface  ClientSurface
-	Progress                func(ProgressEvent)
+	SystemPromptPresetID   string
+	Protocol               Protocol
+	Mode                   Mode
+	Concurrency            int
+	Timeout                time.Duration
+	ConnectTimeout         time.Duration
+	StreamFirstTimeout     time.Duration
+	StreamIdleTimeout      time.Duration
+	StreamMaxDuration      time.Duration
+	DisableStreamMax       bool
+	Filter                 string
+	MaxModels              int
+	InsecureSkipVerify     bool
+	ClientSurface          ClientSurface
+	OpenAIClientSurface    ClientSurface
+	AnthropicClientSurface ClientSurface
+	Progress               func(ProgressEvent)
 }
 
 type ProgressEvent struct {
