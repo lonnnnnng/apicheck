@@ -306,7 +306,7 @@ func normalizeTaskSpecs(tasks []TaskSpec) []TaskSpec {
 		if task.Root == "" || task.Model == "" || task.Protocol == "" {
 			continue
 		}
-		key := task.Root + "\x00" + string(task.Protocol) + "\x00" + task.Model
+		key := task.AccountID + "\x00" + task.Root + "\x00" + string(task.Protocol) + "\x00" + task.Model
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -338,7 +338,7 @@ func runTasks(ctx context.Context, cfg Config, tasks []TaskSpec) []ModelResult {
 	go func() {
 		defer close(jobs)
 		for _, task := range tasks {
-			job := modelTask{root: task.Root, protocol: task.Protocol, model: task.Model}
+			job := modelTask{accountID: task.AccountID, root: task.Root, protocol: task.Protocol, model: task.Model}
 			select {
 			case <-ctx.Done():
 				return
@@ -363,13 +363,16 @@ func runTasks(ctx context.Context, cfg Config, tasks []TaskSpec) []ModelResult {
 		if out[i].Protocol != out[j].Protocol {
 			return out[i].Protocol < out[j].Protocol
 		}
-		return out[i].Root < out[j].Root
+		if out[i].Root != out[j].Root {
+			return out[i].Root < out[j].Root
+		}
+		return out[i].AccountID < out[j].AccountID
 	})
 	return out
 }
 
 func runTask(ctx context.Context, nonStreamClient, streamClient *http.Client, cfg Config, task modelTask) ModelResult {
-	result := ModelResult{Root: task.root, Protocol: task.protocol, Model: task.model}
+	result := ModelResult{AccountID: task.accountID, Root: task.root, Protocol: task.protocol, Model: task.model}
 	if cfg.Mode == ModeBoth || cfg.Mode == ModeNonStream {
 		result.NonStream = probeConversation(ctx, nonStreamClient, cfg, task, false)
 	}

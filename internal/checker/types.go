@@ -82,6 +82,7 @@ type ModelSource struct {
 }
 
 type ModelResult struct {
+	AccountID string      `json:"account_id,omitempty"`
 	Root      string      `json:"root"`
 	Protocol  Protocol    `json:"protocol"`
 	Model     string      `json:"model"`
@@ -118,13 +119,16 @@ type TokenUsage struct {
 }
 
 type TaskSpec struct {
-	Root     string   `json:"root"`
-	Protocol Protocol `json:"protocol"`
-	Model    string   `json:"model"`
+	// AccountID 由前端多账号模式透传，只用于把结果归回对应账号；为空时按单账号处理。
+	AccountID string   `json:"account_id,omitempty"`
+	Root      string   `json:"root"`
+	Protocol  Protocol `json:"protocol"`
+	Model     string   `json:"model"`
 }
 
 type modelTask struct {
-	root     string
-	protocol Protocol
-	model    string
+	accountID string
+	root      string
+	protocol  Protocol
+	model     string
 }
