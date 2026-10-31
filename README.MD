@@ -108,7 +108,7 @@ go run ./cmd/apicheck \
 
 用 `--system-prompt` 模拟真实 coding agent 的系统提示词流量（很多网关会按 system prompt 特征路由或限流，仅用短探测消息探不出这些差异）。可选值：`none`（默认，不发送 system prompt）、`pi`、`codex`、`codex-gpt-5`、`opencode`、`deepseek`、`deepseek-web`。Web UI 与桌面端在“检测提示词”上方和检测弹窗里都可切换。
 
-`pi`、`codex`、`opencode` 预设同时内置了从各家源码核对的配套客户端请求头（User-Agent、`originator`、`x-stainless-*` 等），选择预设即整套模拟该 agent 流量；`codex-gpt-5` 与 `deepseek` 系预设只有提示词、不改变请求头。设置面板可查看当前预设每个协议实际发送的请求头。
+`pi`、`codex`、`opencode` 预设同时内置了从各家源码核对的配套客户端请求头（User-Agent、`originator`、`x-stainless-*` 等），选择预设即整套模拟该 agent 流量；`codex-gpt-5` 与 `deepseek` 系预设只有提示词、不改变请求头。主页面“系统提示词预设”右侧的「预览」按钮可以查看当前预设整套内容：左边是该预设每个协议实际发送的请求头，右边是完整系统提示词。
 
 ```bash
 go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx" --system-prompt codex

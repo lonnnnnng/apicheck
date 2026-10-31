@@ -24,10 +24,10 @@ func main() {
 	app := NewApp()
 	if err := wails.Run(&options.App{
 		Title:            "API Checker",
-		Width:            1240,
-		Height:           688,
-		MinWidth:         980,
-		MinHeight:        656,
+		Width:            1420,
+		Height:           860,
+		MinWidth:         1140,
+		MinHeight:        720,
 		Frameless:        true,
 		CSSDragProperty:  "--wails-draggable",
 		CSSDragValue:     "drag",
