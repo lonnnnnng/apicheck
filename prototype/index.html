@@ -32,7 +32,7 @@
     .sidebar{min-height:0;background:linear-gradient(180deg,#f8fbff 0%,#fffafe 58%,#fff7ed 140%);color:var(--text);border-right:1px solid var(--line);display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
     .sidebar-head{height:38px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,#eaf4ff,#f7f0ff)}.pane-title{font-size:12px;font-weight:800;letter-spacing:.02em}.mini{color:var(--muted-dark);font-size:11px;font-family:var(--mono)}
     .sidebar-form{min-height:0;padding:8px;overflow-y:auto;overscroll-behavior:contain;display:grid;grid-auto-rows:max-content;gap:7px;scrollbar-width:thin;scrollbar-color:rgba(100,116,139,.4) transparent}.sidebar-form::-webkit-scrollbar{width:6px}.sidebar-form::-webkit-scrollbar-thumb{border-radius:3px;background:rgba(100,116,139,.35)}.side-card{border:1px solid #dbe1ea;border-left:3px solid #60a5fa;border-radius:8px;background:linear-gradient(180deg,#fff,#fbfdff);padding:8px 9px}.side-card h2{margin:0 0 6px;color:#293342;font-size:12px;font-weight:850}.label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 4px;color:#2d3645;font-size:11px;font-weight:800}
-    .field{margin-bottom:7px}.select{height:30px;width:100%;border:1px solid #d4dae3;border-radius:8px;background:#fff;color:#243044;font:inherit;font-size:12px;padding:0 8px}.hint{margin-top:4px;color:var(--muted);font-size:11px;line-height:1.5}.field:last-child{margin-bottom:0}.side-action .btn{width:100%;height:30px}.share-action{margin-top:-2px}.share-action .btn{border-color:#99f6e4;background:#ecfdf5;color:#0f766e}.share-action .btn:hover{background:#d8faf3}.share-action .btn[hidden]{display:none}.input,.textarea{width:100%;border:1px solid #c8d0dc;border-radius:7px;background:#fff;color:var(--text);padding:7px 10px;font-size:12px;outline:none}.input{height:32px}.input::placeholder,.textarea::placeholder{color:#8b96a6}.textarea{min-height:148px;resize:vertical;font-family:var(--mono);line-height:1.35;color:#253041;background:#fbfcfe}
+    .field{margin-bottom:7px}.select{height:30px;width:100%;border:1px solid #d4dae3;border-radius:8px;background:#fff;color:#243044;font:inherit;font-size:12px;padding:0 8px}.hint{margin-top:4px;color:var(--muted);font-size:11px;line-height:1.5}.field:last-child{margin-bottom:0}.side-action .btn{width:100%;height:30px}.share-action{margin-top:-2px}.share-action .btn{border-color:#99f6e4;background:#ecfdf5;color:#0f766e}.share-action .btn:hover{background:#d8faf3}.share-action .btn[hidden]{display:none}.input,.textarea{width:100%;border:1px solid #c8d0dc;border-radius:7px;background:#fff;color:var(--text);padding:7px 10px;font-size:12px;outline:none}.input{height:32px}.settings-card .select{height:32px}.input::placeholder,.textarea::placeholder{color:#8b96a6}.textarea{min-height:148px;resize:vertical;font-family:var(--mono);line-height:1.35;color:#253041;background:#fbfcfe}
     .textarea-shell{position:relative}.textarea-shell .textarea{padding-bottom:35px}.field-tools{position:absolute;right:7px;bottom:7px;display:flex;align-items:center;gap:5px}.field-icon-btn{width:24px;height:24px;border:1px solid #bfdbfe;border-radius:7px;background:rgba(239,246,255,.94);color:#1d4ed8;display:inline-flex;align-items:center;justify-content:center;padding:0;box-shadow:0 4px 12px rgba(37,99,235,.1);backdrop-filter:blur(8px)}.field-icon-btn svg{width:13px;height:13px}.field-icon-btn:hover{background:#dbeafe;border-color:#93c5fd}.field-icon-btn.clear{border-color:#fed7aa;background:rgba(255,247,237,.94);color:#c2410c}.field-icon-btn.clear:hover{background:#ffedd5;border-color:#fdba74}.field-icon-btn.is-done{border-color:#99f6e4;background:#ecfdf5;color:#0f766e}
     .base64-tool-btn{height:24px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;color:#1d4ed8;padding:0 7px;display:inline-flex;align-items:center;justify-content:center;gap:5px;font-size:10px;font-weight:800;line-height:1}.base64-tool-btn svg{width:13px;height:13px;flex:0 0 13px}.base64-tool-btn:hover{border-color:#93c5fd;background:#dbeafe}
     .split{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sidebar-form .textarea{resize:none}.sidebar-form .base-url-box{height:64px;min-height:64px}.sidebar-form .api-key-box{height:96px;min-height:96px}.sidebar-form .api-key-box.is-masked{color:#7b8798;letter-spacing:.06em}.sidebar-form .prompt-box{height:145px;min-height:145px}.radio-group{display:grid;grid-template-columns:1fr 1fr;gap:5px}.radio-card{min-width:0;min-height:26px;border:1px solid #c8d0dc;border-radius:7px;background:#fff;color:#344154;display:flex;align-items:center;gap:7px;padding:0 7px;font-size:12px;font-weight:700}.radio-card input{width:13px;height:13px;margin:0;accent-color:var(--blue);flex:0 0 13px}.radio-card span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.radio-card:has(input:checked){border-color:#9bb7ff;background:#eff6ff;color:#172554;box-shadow:inset 0 0 0 1px rgba(37,99,235,.14)}
@@ -180,6 +180,14 @@
         <div class="settings-body">
           <div class="settings-grid">
             <div class="settings-left">
+              <section class="settings-section">
+                <h3>默认检测参数</h3>
+                <div class="split">
+                  <div class="field"><div class="label"><span>默认协议</span></div><select class="select" id="defaultProtocol"><option value="openai-chat">Chat</option><option value="openai-responses">Responses</option><option value="anthropic-messages">Claude</option></select></div>
+                  <div class="field"><div class="label"><span>默认模式</span></div><select class="select" id="defaultMode"><option value="nonstream">非流式</option><option value="stream">流式</option></select></div>
+                </div>
+                <div class="hint">打开检测弹窗时的初始协议与模式；在弹窗里改动也会同步回这里。</div>
+              </section>
               <section class="settings-section">
                 <h3>运行参数</h3>
                 <div class="split">
@@ -391,12 +399,13 @@ const CACHE_KEY='apicheck:accounts:v5';
 const CACHE_KEY_LEGACY='apicheck:last-inputs:v4';
 let accounts=[];
 let activeAccountId='';
+const PROTOCOL_VALUES=['openai-chat','openai-responses','anthropic-messages'],MODE_VALUES=['nonstream','stream'];
 const state={systemPrompt:'none',active:0,testProtocol:'openai-chat',mode:'nonstream',preview:'curl',checkPanel:'chat',checkPreview:'curl',agentIdentityView:'openai',identityContentTab:'headers',busy:false,loadingModels:false,shareable:false,collapsedAccounts:new Set(),apiKeyVisible:false};
 const previewEl=document.getElementById('preview'),rowsEl=document.getElementById('rows'),searchEl=document.getElementById('search'),emptyEl=document.getElementById('empty'),baseUrlEl=document.getElementById('baseUrl');
 const emptyTitleEl=document.getElementById('emptyTitle'),emptyDetailEl=document.getElementById('emptyDetail'),emptyErrorsEl=document.getElementById('emptyErrors');
 const stats={models:document.getElementById('statModels'),ok:document.getElementById('statOk'),bad:document.getElementById('statBad'),stream:document.getElementById('statStream')};
 const statEls={models:stats.models.closest('.tag'),ok:stats.ok.closest('.tag'),bad:stats.bad.closest('.tag'),stream:stats.stream.closest('.tag')};
-const apiKeyEl=document.getElementById('apiKey'),concurrencyEl=document.getElementById('concurrency'),timeoutEl=document.getElementById('timeout'),connectTimeoutEl=document.getElementById('connectTimeout');
+const apiKeyEl=document.getElementById('apiKey'),concurrencyEl=document.getElementById('concurrency'),timeoutEl=document.getElementById('timeout'),connectTimeoutEl=document.getElementById('connectTimeout'),defaultProtocolEl=document.getElementById('defaultProtocol'),defaultModeEl=document.getElementById('defaultMode');
 const streamFirstTimeoutEl=document.getElementById('streamFirstTimeout'),streamIdleTimeoutEl=document.getElementById('streamIdleTimeout'),streamMaxDurationEl=document.getElementById('streamMaxDuration');
 const systemPromptSelectEl=document.getElementById('systemPromptSelect'),systemPromptDescEl=document.getElementById('systemPromptDesc'),systemPromptViewEl=document.getElementById('systemPromptView'),systemPromptMetaEl=document.getElementById('systemPromptMeta'),promptInputEl=document.getElementById('promptInput'),modelsBtnEl=document.getElementById('modelsBtn'),modelsBtnLabelEl=document.getElementById('modelsBtnLabel');
 const closeWindowBtnEl=document.getElementById('closeWindowBtn'),minWindowBtnEl=document.getElementById('minWindowBtn'),zoomWindowBtnEl=document.getElementById('zoomWindowBtn');
@@ -440,6 +449,7 @@ function showToast(message,type='success'){
   toastTimer=setTimeout(()=>{toastEl.hidden=true},3200);
 }
 function openSettings(){
+  syncDefaultParamControls();
   settingsModalEl.hidden=false;
   document.body.classList.add('modal-open');
   setPreview();
@@ -575,6 +585,12 @@ function resetCheckOutputs(message){
 function setDialogRadiosFromState(){
   checkProtocolInputs.forEach(input=>{input.checked=input.value===state.testProtocol});
   checkModeInputs.forEach(input=>{input.checked=input.value===state.mode});
+  syncDefaultParamControls();
+}
+// 作者 long: 设置里的“默认协议/默认模式”就是检测弹窗打开时的初始选项，设置面板与弹窗改动共用同一份状态。
+function syncDefaultParamControls(){
+  defaultProtocolEl.value=state.testProtocol;
+  defaultModeEl.value=state.mode;
 }
 function readCheckedValue(inputs,fallback){
   return inputs.find(input=>input.checked)?.value||fallback;
@@ -586,6 +602,8 @@ function syncDialogOptions(resetOutput=true){
   state.testProtocol=readCheckedValue(checkProtocolInputs,state.testProtocol);
   state.mode=readCheckedValue(checkModeInputs,state.mode);
   checkDialogMode=state.mode;
+  syncDefaultParamControls();
+  saveCachedInputs();
   checkDialogTasks=buildCheckDialogTasks();
   setDialogResultMode();
   if(resetOutput)resetCheckOutputs('检测请求已准备，点击发送后开始调用接口。');
@@ -1083,7 +1101,9 @@ function saveCachedInputs(){
       activeAccountId,
       collapsedAccounts:[...state.collapsedAccounts],
       prompt:promptInputEl.value,
-      systemPrompt:state.systemPrompt
+      systemPrompt:state.systemPrompt,
+      defaultProtocol:state.testProtocol,
+      defaultMode:state.mode
     }));
   }catch{}
 }
@@ -1107,8 +1127,12 @@ function loadCachedInputs(){
   state.collapsedAccounts=new Set((Array.isArray(cached?.collapsedAccounts)?cached.collapsedAccounts:[]).filter(id=>accountById(id)));
   if(cached?.prompt)promptInputEl.value=cached.prompt;
   if(cached?.systemPrompt)state.systemPrompt=cached.systemPrompt;
+  // 作者 long: 老版本没有这两个字段，校验不过就保持内置默认值。
+  if(PROTOCOL_VALUES.includes(cached?.defaultProtocol))state.testProtocol=cached.defaultProtocol;
+  if(MODE_VALUES.includes(cached?.defaultMode))state.mode=cached.defaultMode;
   applyActiveAccountToForm();
   renderAccounts();
+  setDialogRadiosFromState();
 }
 function maskedApiKey(key){
   const value=String(key||'').trim();
@@ -1428,6 +1452,18 @@ deleteAccountBtnEl.addEventListener('click',requestDeleteAccount);
 checkAllBtnEl.addEventListener('click',checkAllAccounts);
 promptInputEl.addEventListener('input',()=>{saveCachedInputs();setPreview()});
 checkPromptEl.addEventListener('input',()=>syncCheckPrompt(checkPromptEl.value));
+[defaultProtocolEl,defaultModeEl].forEach(el=>el.addEventListener('change',()=>{
+  state.testProtocol=defaultProtocolEl.value;
+  state.mode=defaultModeEl.value;
+  checkDialogMode=state.mode;
+  checkProtocolInputs.forEach(input=>{input.checked=input.value===state.testProtocol});
+  checkModeInputs.forEach(input=>{input.checked=input.value===state.mode});
+  saveCachedInputs();
+  if(!checkModalEl.hidden)syncDialogOptions(false);
+  render();
+  setPreview();
+  updateButtons();
+}));
 settingsBtnEl.addEventListener('click',openSettings);
 closeSettingsBtnEl.addEventListener('click',closeSettings);
 settingsModalEl.addEventListener('click',event=>{if(event.target===settingsModalEl)closeSettings()});
