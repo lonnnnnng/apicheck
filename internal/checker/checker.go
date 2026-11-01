@@ -11,10 +11,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 const (
@@ -148,7 +152,33 @@ func newHTTPClient(cfg Config, totalTimeout, responseHeaderTimeout time.Duration
 	if cfg.InsecureSkipVerify {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // 用户显式测试自签名网关时才会打开。
 	}
+	applyProxy(transport, cfg.Proxy)
 	return &http.Client{Timeout: totalTimeout, Transport: transport}
+}
+
+// applyProxy 让探测请求走用户指定的出口代理。
+// 单独处理 socks5：http.Transport 的 Proxy 只认 http/https 代理。
+func applyProxy(transport *http.Transport, raw string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "socks5", "socks5h":
+		dialer, err := proxy.FromURL(parsed, &net.Dialer{Timeout: 30 * time.Second})
+		if err != nil {
+			return
+		}
+		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			return dialer.Dial(network, address)
+		}
+	case "http", "https":
+		transport.Proxy = http.ProxyURL(parsed)
+	}
 }
 
 func probeModelSources(ctx context.Context, client *http.Client, cfg Config, root string) []ModelSource {
@@ -225,6 +255,7 @@ func listModels(ctx context.Context, client *http.Client, cfg Config, root, auth
 	req.Header.Set("Accept", "application/json")
 	applyAuthHeaders(req, cfg.APIKey, authStyle)
 	applyClientHeaders(req, authStyle, cfg)
+	applyCustomHeaders(req, cfg)
 
 	start := time.Now()
 	resp, err := client.Do(req)
@@ -332,13 +363,37 @@ func runTasks(ctx context.Context, cfg Config, tasks []TaskSpec) []ModelResult {
 	if workers > len(tasks) {
 		workers = len(tasks)
 	}
+	if workers < 1 {
+		workers = 1
+	}
+	// 作者 long: 自适应并发。被网关限流时把"同时进行"的请求数上限压下来，
+	// 已启动的 worker 不退出，只是排队等待许可，避免越试越限。
+	var permits atomic.Int64
+	permits.Store(int64(workers))
+	if cfg.AdaptiveConcurrency {
+		permits.Store(1)
+	}
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for task := range jobs {
-				results <- runTask(ctx, nonStreamClient, streamClient, cfg, task)
+				if cfg.AdaptiveConcurrency {
+					acquirePermit(&permits)
+				}
+				result, throttled := runTaskWithRetry(ctx, nonStreamClient, streamClient, cfg, task)
+				if cfg.AdaptiveConcurrency {
+					if throttled {
+						halvePermits(&permits, workers)
+					} else {
+						permits.Add(1)
+						if permits.Load() > int64(workers) {
+							permits.Store(int64(workers))
+						}
+					}
+				}
+				results <- result
 			}
 		}()
 	}
@@ -1431,4 +1486,84 @@ func truncateErrorMessage(message string) string {
 func trimBody(body []byte) string {
 	text := strings.TrimSpace(string(body))
 	return text
+}
+
+// acquirePermit 阻塞到拿到一个并发许可，或者 ctx 结束。
+func acquirePermit(permits *atomic.Int64) {
+	for {
+		if permits.Add(-1) >= 0 {
+			return
+		}
+		permits.Add(1)
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// halvePermits 在遇到限流时收缩并发窗口，下限为 1。
+func halvePermits(permits *atomic.Int64, ceiling int) {
+	next := permits.Load() / 2
+	if next < 1 {
+		next = 1
+	}
+	if int(next) > ceiling {
+		next = int64(ceiling)
+	}
+	permits.Store(next)
+}
+
+// runTaskWithRetry 在可重试错误（限流 / 5xx / 网络抖动）上重试。
+// 返回值 throttled 表示这次是否撞上了限流，供自适应并发收缩窗口。
+func runTaskWithRetry(ctx context.Context, nonStreamClient, streamClient *http.Client, cfg Config, task modelTask) (ModelResult, bool) {
+	attempts := cfg.Retries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	var last ModelResult
+	throttled := false
+	for attempt := 0; attempt < attempts; attempt++ {
+		if ctx.Err() != nil {
+			break
+		}
+		last = runTask(ctx, nonStreamClient, streamClient, cfg, task)
+		if !resultNeedsRetry(last) {
+			return last, throttled
+		}
+		if hasErrorClass(last, "rate_limited") {
+			throttled = true
+		}
+		if attempt == attempts-1 {
+			break
+		}
+		// 退避：1s、2s、4s…上限 8s，避免把限流窗口撞穿。
+		backoff := time.Duration(1<<uint(attempt)) * time.Second
+		if backoff > 8*time.Second {
+			backoff = 8 * time.Second
+		}
+		select {
+		case <-ctx.Done():
+			return last, throttled
+		case <-time.After(backoff):
+		}
+	}
+	return last, throttled
+}
+
+// resultNeedsRetry 判断一次模型探测是否值得重试。
+func resultNeedsRetry(result ModelResult) bool {
+	retryable := func(probe ProbeResult) bool {
+		if !probe.Tested || probe.OK {
+			return false
+		}
+		switch probe.ErrorClass {
+		case "rate_limited", "server_error", "request_failed", "stream_first_timeout", "stream_idle_timeout", "stream_max_duration":
+			return true
+		}
+		return probe.HTTPStatus >= 500
+	}
+	return retryable(result.NonStream) || retryable(result.Stream)
+}
+
+// hasErrorClass 判断一次探测结果里是否出现了指定错误类别。
+func hasErrorClass(result ModelResult, class string) bool {
+	return result.NonStream.ErrorClass == class || result.Stream.ErrorClass == class
 }

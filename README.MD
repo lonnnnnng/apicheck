@@ -97,6 +97,7 @@ go run ./cmd/apicheck \
   --protocol auto \
   --mode both \
   --concurrency 2 \
+  --max-tokens 256 \
   --timeout 60s \
   --connect-timeout 30s \
   --stream-first-timeout 60s \
@@ -123,6 +124,30 @@ go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx" --m
 ```
 
 桌面端与 Web UI 在设置弹窗的「运行参数」里可以直接改「输出上限」。
+
+## 网络与请求头
+
+出口代理（`--proxy`，支持 `http` / `https` / `socks5`）：
+
+```bash
+go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx"   --proxy http://127.0.0.1:8080
+```
+
+自定义请求头（`--header`，每行一条 `Name: Value`，`#` 开头为注释）。这些头在 Agent 身份头之后写入，所以能覆盖预设的 `User-Agent` 等；也会出现在请求预览里，方便核对网关实际收到什么：
+
+```bash
+go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx"   --header "x-gateway-token: abc123"
+```
+
+自签名网关用 `--insecure-skip-verify` 跳过证书校验。
+
+## 限流与模型数量
+
+`--retries` 在限流（429）、5xx 和网络类错误上重试，退避 1s 起、上限 8s；认证失败与请求格式错误不重试。
+
+`--adaptive-concurrency` 打开后，一旦某次探测撞上限流就把并发窗口减半，之后每完成一个任务缓慢加回，避免越试越限。
+
+`--max-models` 限制每个来源最多探测多少个模型，`--filter` 只测名字包含指定文本的模型（Web UI 顶部搜索框在拉取模型列表时也会作为过滤条件传给后端）。
 
 失败原因说明：探测失败时，表格行下方会补一行缩进的 `↳` 说明，输出可读的错误原因（多层嵌套的网关错误会被拍平成“上游错误码：403 → 10605 + 上游详情 JSON”）。流式请求即使 HTTP 200，只要响应里出现 `response.failed`、`response.incomplete` 或 `error` 事件，也会判定为失败并显示原因，而不是把整段 SSE 原文当成成功响应。
 

@@ -36,7 +36,16 @@ type Config struct {
 	// SystemPromptPresetID 选择系统提示词预设（见 system_prompt.go）；空或 "none" 表示不发送 system prompt。
 	SystemPromptPresetID string
 	// MaxTokens 是探测请求的 max_output_tokens / max_tokens 上限；<=0 用 defaultProbeMaxTokens。
-	MaxTokens              int
+	MaxTokens int
+	// Proxy 是出口代理，支持 http/https/socks5；空表示直连。
+	Proxy string
+	// CustomHeaders 是用户追加的自定义请求头，每行一条 "Name: Value"。
+	// 在 Agent 身份头之后应用，因此可以覆盖预设身份头。
+	CustomHeaders string
+	// Retries 是单个探测失败后的额外重试次数（仅对限流/5xx/网络类错误重试）。
+	Retries int
+	// AdaptiveConcurrency 打开后遇到 429 会把并发上限减半，避免越试越限。
+	AdaptiveConcurrency    bool
 	Protocol               Protocol
 	Mode                   Mode
 	Concurrency            int

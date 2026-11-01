@@ -25,6 +25,10 @@ type Request struct {
 	Filter               string             `json:"filter"`
 	MaxModels            int                `json:"max_models"`
 	MaxTokens            int                `json:"max_tokens"`
+	Proxy                string             `json:"proxy"`
+	CustomHeaders        string             `json:"custom_headers"`
+	Retries              int                `json:"retries"`
+	AdaptiveConcurrency  bool               `json:"adaptive_concurrency"`
 	SkipTLSVerify        bool               `json:"skip_tls_verify"`
 	ConnectTimeout       string             `json:"connect_timeout"`
 	OpenAIUASurface      string             `json:"openai_ua_surface"`
@@ -70,6 +74,10 @@ func ConfigFrom(req Request, defaultSurface checker.ClientSurface) checker.Confi
 		Filter:                 req.Filter,
 		MaxModels:              req.MaxModels,
 		MaxTokens:              req.MaxTokens,
+		Proxy:                  strings.TrimSpace(req.Proxy),
+		CustomHeaders:          req.CustomHeaders,
+		Retries:                req.Retries,
+		AdaptiveConcurrency:    req.AdaptiveConcurrency,
 		InsecureSkipVerify:     req.SkipTLSVerify,
 		ClientSurface:          defaultSurface,
 		OpenAIClientSurface:    ParseClientSurfaceOrDefault(req.OpenAIUASurface, defaultSurface),

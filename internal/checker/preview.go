@@ -82,6 +82,7 @@ func conversationRequestParts(ctx context.Context, cfg Config, task modelTask, s
 	}
 	applyAuthHeaders(req, cfg.APIKey, authStyle)
 	applyClientHeaders(req, authStyle, cfg)
+	applyCustomHeaders(req, cfg)
 
 	names := make([]string, 0, len(req.Header))
 	for name := range req.Header {
@@ -215,6 +216,7 @@ func modelListPreviewRequest(cfg Config, root, authStyle, apiKey string) (Previe
 	}
 	applyAuthHeaders(req, apiKey, authStyle)
 	applyClientHeaders(req, authStyle, cfg)
+	applyCustomHeaders(req, cfg)
 	names := make([]string, 0, len(req.Header))
 	for name := range req.Header {
 		names = append(names, name)
