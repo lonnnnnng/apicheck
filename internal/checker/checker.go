@@ -3,6 +3,7 @@ package checker
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -441,6 +442,18 @@ func conversationEndpoint(protocol Protocol) string {
 	}
 }
 
+// 作者 long: 一些中转网关（new-api 系，例如 anyrouter）在 /responses 上强制要求
+// prompt_cache_key，缺了直接回 400 invalid_responses_request（"prompt_cache_key is required"）。
+// 官方接口里它是可选的缓存路由键，真实 codex 客户端每轮都会带一个会话级 UUID。
+// 这里按模型名派生一个 UUID 形状的稳定值：既能过校验，重复探测也落在同一缓存分区。
+func probePromptCacheKey(model string) string {
+	sum := sha256.Sum256([]byte("apicheck|" + model))
+	b := sum[:16]
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
 func conversationBody(protocol Protocol, model string, stream bool, prompt string) ([]byte, error) {
 	return conversationBodyWithSystem(protocol, model, stream, prompt, "")
 }
@@ -468,6 +481,7 @@ func conversationBodyWithSystem(protocol Protocol, model string, stream bool, pr
 			"input":             prompt,
 			"max_output_tokens": defaultProbeMaxTokens,
 			"stream":            stream,
+			"prompt_cache_key":  probePromptCacheKey(model),
 		}
 		if systemPrompt != "" {
 			body["instructions"] = systemPrompt
