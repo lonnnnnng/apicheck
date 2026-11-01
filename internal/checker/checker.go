@@ -476,11 +476,14 @@ func conversationBodyWithSystem(protocol Protocol, model string, stream bool, pr
 			"messages": messages,
 		}
 	case ProtocolOpenAIResponses:
+		// 作者 long: input 用数组形态发，和真实 codex 一致。
+		// 某些中转网关（new-api 系）只认数组，传字符串会回 400 "input is required"。
 		body := map[string]any{
 			"model":             model,
-			"input":             prompt,
+			"input":             []map[string]any{{"type": "message", "role": "user", "content": []map[string]string{{"type": "input_text", "text": prompt}}}},
 			"max_output_tokens": defaultProbeMaxTokens,
 			"stream":            stream,
+			"store":             false,
 			"prompt_cache_key":  probePromptCacheKey(model),
 		}
 		if systemPrompt != "" {

@@ -23,6 +23,26 @@ func TestResponsesBodyCarriesPromptCacheKey(t *testing.T) {
 	if len(key) != 36 || key[8] != '-' || key[13] != '-' || key[18] != '-' || key[23] != '-' {
 		t.Fatalf("prompt_cache_key 不是 UUID 形状: %q", key)
 	}
+	// new-api 系网关只认数组形态的 input，传字符串会回 400 "input is required"。
+	input, ok := body["input"].([]any)
+	if !ok || len(input) != 1 {
+		t.Fatalf("input 期望数组形态, 实际 %#v", body["input"])
+	}
+	item, _ := input[0].(map[string]any)
+	if item["type"] != "message" || item["role"] != "user" {
+		t.Fatalf("input[0] 期望 user message, 实际 %#v", item)
+	}
+	content, _ := item["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("input[0].content 期望 1 段, 实际 %#v", item["content"])
+	}
+	part, _ := content[0].(map[string]any)
+	if part["type"] != "input_text" || part["text"] != "ping" {
+		t.Fatalf("content[0] 期望 input_text/ping, 实际 %#v", part)
+	}
+	if body["store"] != false {
+		t.Fatalf("store 期望 false, 实际 %#v", body["store"])
+	}
 	if body["max_output_tokens"] != float64(defaultProbeMaxTokens) {
 		t.Fatalf("max_output_tokens 期望 %d, 实际 %v", defaultProbeMaxTokens, body["max_output_tokens"])
 	}
