@@ -62,7 +62,7 @@ func conversationRequestParts(ctx context.Context, cfg Config, task modelTask, s
 	if preset, ok := SystemPromptByID(cfg.SystemPromptPresetID); ok && preset.ID != "none" {
 		systemPrompt = preset.SystemPrompt
 	}
-	body, err := conversationBodyWithSystem(task.protocol, task.model, stream, cfg.Prompt, systemPrompt)
+	body, err := conversationBodyWithOptions(task.protocol, task.model, stream, cfg.Prompt, systemPrompt, cfg.MaxTokens)
 	if err != nil {
 		return requestParts{}, err
 	}

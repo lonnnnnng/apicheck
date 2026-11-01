@@ -34,7 +34,9 @@ type Config struct {
 	APIKey  string
 	Prompt  string
 	// SystemPromptPresetID 选择系统提示词预设（见 system_prompt.go）；空或 "none" 表示不发送 system prompt。
-	SystemPromptPresetID   string
+	SystemPromptPresetID string
+	// MaxTokens 是探测请求的 max_output_tokens / max_tokens 上限；<=0 用 defaultProbeMaxTokens。
+	MaxTokens              int
 	Protocol               Protocol
 	Mode                   Mode
 	Concurrency            int

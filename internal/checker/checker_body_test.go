@@ -2,6 +2,7 @@ package checker
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -74,5 +75,59 @@ func TestPromptCacheKeyOnlyOnResponses(t *testing.T) {
 		if _, ok := body["prompt_cache_key"]; ok {
 			t.Fatalf("%s 不应该带 prompt_cache_key: %s", protocol, raw)
 		}
+	}
+}
+
+func TestConversationBodyHonoursMaxTokens(t *testing.T) {
+	cases := []Protocol{ProtocolOpenAIResponses, ProtocolAnthropicMessages}
+	for _, protocol := range cases {
+		raw, err := conversationBodyWithOptions(protocol, "m", false, "ping", "", 777)
+		if err != nil {
+			t.Fatalf("%s: %v", protocol, err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("%s: %v", protocol, err)
+		}
+		got := body["max_output_tokens"]
+		if protocol == ProtocolAnthropicMessages {
+			got = body["max_tokens"]
+		}
+		if got != float64(777) {
+			t.Fatalf("%s: 期望 777, 实际 %v", protocol, got)
+		}
+		// 0 表示回退默认值
+		raw, err = conversationBodyWithOptions(protocol, "m", false, "ping", "", 0)
+		if err != nil {
+			t.Fatalf("%s: %v", protocol, err)
+		}
+		body = map[string]any{}
+		_ = json.Unmarshal(raw, &body)
+		got = body["max_output_tokens"]
+		if protocol == ProtocolAnthropicMessages {
+			got = body["max_tokens"]
+		}
+		if got != float64(defaultProbeMaxTokens) {
+			t.Fatalf("%s: 期望默认 %d, 实际 %v", protocol, defaultProbeMaxTokens, got)
+		}
+	}
+}
+
+// 预览与真实请求必须用同一个输出上限，否则用户看到的 curl 与实际发送不一致。
+func TestPreviewCarriesConfiguredMaxTokens(t *testing.T) {
+	cfg := Config{
+		BaseURL:   "https://example.com/v1",
+		APIKey:    "k",
+		Protocol:  ProtocolOpenAIResponses,
+		Mode:      ModeStream,
+		Prompt:    "ping",
+		MaxTokens: 1234,
+	}
+	text, err := Preview(cfg, TaskSpec{Root: "https://example.com/v1", Protocol: ProtocolOpenAIResponses, Model: "m"}, true, PreviewCurl)
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if !strings.Contains(text, `"max_output_tokens":1234`) {
+		t.Fatalf("预览未带上 max_tokens:\n%s", text)
 	}
 }

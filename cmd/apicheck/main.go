@@ -36,6 +36,7 @@ func main() {
 	flag.DurationVar(&cfg.StreamIdleTimeout, "stream-idle-timeout", 60*time.Second, "stream idle timeout")
 	flag.StringVar(&streamMaxDuration, "stream-max-duration", "10m", "stream max duration, 0 means unlimited")
 	flag.StringVar(&cfg.Prompt, "prompt", "", "conversation probe prompt")
+	flag.IntVar(&cfg.MaxTokens, "max-tokens", 0, "max output tokens for the probe request (default 256)")
 	flag.StringVar(&cfg.SystemPromptPresetID, "system-prompt", "", "system prompt preset: "+strings.Join(checker.SystemPromptIDs(), "/"))
 	flag.StringVar(&cfg.Filter, "filter", "", "only test models containing this text")
 	flag.IntVar(&cfg.MaxModels, "max-models", 0, "max models per discovered source, 0 means unlimited")

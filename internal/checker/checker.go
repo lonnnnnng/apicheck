@@ -127,6 +127,9 @@ func withDefaults(cfg Config) Config {
 	if strings.TrimSpace(cfg.Prompt) == "" {
 		cfg.Prompt = defaultProbePrompt
 	}
+	if cfg.MaxTokens <= 0 {
+		cfg.MaxTokens = defaultProbeMaxTokens
+	}
 	cfg.ClientSurface = normalizeClientSurface(cfg.ClientSurface, ClientSurfaceCLI)
 	cfg.OpenAIClientSurface = normalizeClientSurface(cfg.OpenAIClientSurface, cfg.ClientSurface)
 	cfg.AnthropicClientSurface = normalizeClientSurface(cfg.AnthropicClientSurface, cfg.ClientSurface)
@@ -458,13 +461,22 @@ func probePromptCacheKey(model string) string {
 }
 
 func conversationBody(protocol Protocol, model string, stream bool, prompt string) ([]byte, error) {
-	return conversationBodyWithSystem(protocol, model, stream, prompt, "")
+	return conversationBodyWithOptions(protocol, model, stream, prompt, "", 0)
 }
 
 // conversationBodyWithSystem 在探测请求中加入可选 system prompt。
+func conversationBodyWithSystem(protocol Protocol, model string, stream bool, prompt string, systemPrompt string) ([]byte, error) {
+	return conversationBodyWithOptions(protocol, model, stream, prompt, systemPrompt, 0)
+}
+
+// conversationBodyWithOptions 是探测请求体的唯一构造入口。
 // 三个协议的 system 角色字段名不同（messages[0] / instructions / system），
 // 但语义一致：模拟真实 agent 的系统提示词流量。
-func conversationBodyWithSystem(protocol Protocol, model string, stream bool, prompt string, systemPrompt string) ([]byte, error) {
+// maxTokens <=0 时回退 defaultProbeMaxTokens；maxTokensLimit 由调用方（cfg 已归一化）保证合法。
+func conversationBodyWithOptions(protocol Protocol, model string, stream bool, prompt string, systemPrompt string, maxTokens int) ([]byte, error) {
+	if maxTokens <= 0 {
+		maxTokens = defaultProbeMaxTokens
+	}
 	var payload any
 	switch protocol {
 	case ProtocolOpenAIChat:
@@ -484,7 +496,7 @@ func conversationBodyWithSystem(protocol Protocol, model string, stream bool, pr
 		body := map[string]any{
 			"model":             model,
 			"input":             []map[string]any{{"type": "message", "role": "user", "content": []map[string]string{{"type": "input_text", "text": prompt}}}},
-			"max_output_tokens": defaultProbeMaxTokens,
+			"max_output_tokens": maxTokens,
 			"stream":            stream,
 			"store":             false,
 			"prompt_cache_key":  probePromptCacheKey(model),
@@ -496,7 +508,7 @@ func conversationBodyWithSystem(protocol Protocol, model string, stream bool, pr
 	case ProtocolAnthropicMessages:
 		body := map[string]any{
 			"model":      model,
-			"max_tokens": defaultProbeMaxTokens,
+			"max_tokens": maxTokens,
 			"stream":     stream,
 			"messages": []map[string]string{
 				{"role": "user", "content": prompt},

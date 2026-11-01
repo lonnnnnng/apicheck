@@ -24,6 +24,7 @@ type Request struct {
 	StreamMaxDuration    string             `json:"stream_max_duration"`
 	Filter               string             `json:"filter"`
 	MaxModels            int                `json:"max_models"`
+	MaxTokens            int                `json:"max_tokens"`
 	SkipTLSVerify        bool               `json:"skip_tls_verify"`
 	ConnectTimeout       string             `json:"connect_timeout"`
 	OpenAIUASurface      string             `json:"openai_ua_surface"`
@@ -68,6 +69,7 @@ func ConfigFrom(req Request, defaultSurface checker.ClientSurface) checker.Confi
 		DisableStreamMax:       disableStreamMax,
 		Filter:                 req.Filter,
 		MaxModels:              req.MaxModels,
+		MaxTokens:              req.MaxTokens,
 		InsecureSkipVerify:     req.SkipTLSVerify,
 		ClientSurface:          defaultSurface,
 		OpenAIClientSurface:    ParseClientSurfaceOrDefault(req.OpenAIUASurface, defaultSurface),

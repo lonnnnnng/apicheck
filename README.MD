@@ -114,6 +114,16 @@ go run ./cmd/apicheck \
 go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx" --system-prompt codex
 ```
 
+输出上限：
+
+探测请求会带 `max_output_tokens`（Anthropic 协议是 `max_tokens`），默认 256。取值太小会把正常回答截断：网关会回 `response.incomplete` / `stop_reason=max_tokens`，工具识别为「截断」而非失败（CLI 显示 `ok(截断)`），但内容只剩半句。配合长系统提示词（如 `codex-gpt-5` 约 20KB）和长提示词时建议调大。
+
+```bash
+go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx" --max-tokens 1024
+```
+
+桌面端与 Web UI 在设置弹窗的「运行参数」里可以直接改「输出上限」。
+
 失败原因说明：探测失败时，表格行下方会补一行缩进的 `↳` 说明，输出可读的错误原因（多层嵌套的网关错误会被拍平成“上游错误码：403 → 10605 + 上游详情 JSON”）。流式请求即使 HTTP 200，只要响应里出现 `response.failed`、`response.incomplete` 或 `error` 事件，也会判定为失败并显示原因，而不是把整段 SSE 原文当成成功响应。
 
 超时说明：
