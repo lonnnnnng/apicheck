@@ -104,6 +104,12 @@ type ProbeResult struct {
 	RawError     string `json:"raw_error,omitempty"`
 	// TokenUsage 是从响应 usage 字段提取的 token 用量；网关未返回时为零值，前端不展示。
 	TokenUsage TokenUsage `json:"token_usage,omitempty"`
+	// Truncated 表示上游明确告知"响应被 max_output_tokens 截断"（responses 的
+	// response.incomplete / anthropic 的 stop_reason=max_tokens）。这类响应模型
+	// 已经正常出字，说明链路是通的，不应按失败处理。
+	Truncated bool `json:"truncated,omitempty"`
+	// IncompleteReason 记录截断原因，便于前端提示"把 max tokens 调大"。
+	IncompleteReason string `json:"incomplete_reason,omitempty"`
 }
 
 // TokenUsage 统一三种协议的 usage 命名：OpenAI 的 prompt/completion tokens

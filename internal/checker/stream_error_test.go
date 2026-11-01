@@ -47,11 +47,11 @@ func TestExtractStreamEventError(t *testing.T) {
 			wantMsg: "quota exceeded",
 		},
 		{
-			name:    "responses incomplete",
-			body:    `{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}`,
-			wantOK:  true,
-			wantCod: "incomplete",
-			wantMsg: "响应不完整：max_output_tokens",
+			// 截断不是失败：模型已经正常出字，链路是通的。
+			// 这种事件由 extractStreamTruncation 单独识别。
+			name:   "responses incomplete is truncation not error",
+			body:   `{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}`,
+			wantOK: false,
 		},
 		{
 			name:   "in progress is not an error",
@@ -260,5 +260,130 @@ func TestStreamResponseDoneEventsDoNotDuplicateText(t *testing.T) {
 	}
 	if result.TokenUsage.Input != 11 || result.TokenUsage.Output != 5 {
 		t.Fatalf("token 用量异常: %#v", result.TokenUsage)
+	}
+}
+
+func TestExtractStreamTruncation(t *testing.T) {
+	cases := []struct {
+		name    string
+		prot    Protocol
+		body    string
+		wantOK  bool
+		wantRea string
+	}{
+		{
+			name:    "responses incomplete",
+			prot:    ProtocolOpenAIResponses,
+			body:    `{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}`,
+			wantOK:  true,
+			wantRea: "max_output_tokens",
+		},
+		{
+			name:    "responses incomplete without reason",
+			prot:    ProtocolOpenAIResponses,
+			body:    `{"type":"response.incomplete","response":{}}`,
+			wantOK:  true,
+			wantRea: "incomplete",
+		},
+		{
+			name:    "anthropic max_tokens",
+			prot:    ProtocolAnthropicMessages,
+			body:    `{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}`,
+			wantOK:  true,
+			wantRea: "max_tokens",
+		},
+		{
+			name:   "anthropic end_turn is complete",
+			prot:   ProtocolAnthropicMessages,
+			body:   `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
+			wantOK: false,
+		},
+		{
+			name:   "responses completed is complete",
+			prot:   ProtocolOpenAIResponses,
+			body:   `{"type":"response.completed","response":{"status":"completed"}}`,
+			wantOK: false,
+		},
+	}
+	for _, testCase := range cases {
+		reason, ok := extractStreamTruncation(testCase.prot, []byte(testCase.body))
+		if ok != testCase.wantOK {
+			t.Fatalf("%s: ok = %v, want %v (%q)", testCase.name, ok, testCase.wantOK, reason)
+		}
+		if ok && reason != testCase.wantRea {
+			t.Fatalf("%s: reason = %q, want %q", testCase.name, reason, testCase.wantRea)
+		}
+	}
+}
+
+func TestExtractResponseTruncation(t *testing.T) {
+	cases := []struct {
+		name   string
+		prot   Protocol
+		body   string
+		wantOK bool
+	}{
+		{
+			name:   "responses incomplete",
+			prot:   ProtocolOpenAIResponses,
+			body:   `{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}`,
+			wantOK: true,
+		},
+		{
+			name:   "responses completed",
+			prot:   ProtocolOpenAIResponses,
+			body:   `{"status":"completed","output":[{"content":[{"type":"output_text","text":"pong"}]}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "anthropic max_tokens",
+			prot:   ProtocolAnthropicMessages,
+			body:   `{"stop_reason":"max_tokens","content":[{"type":"text","text":"po"}]}`,
+			wantOK: true,
+		},
+		{
+			name:   "chat finish_reason length",
+			prot:   ProtocolOpenAIChat,
+			body:   `{"choices":[{"finish_reason":"length","message":{"content":"po"}}]}`,
+			wantOK: true,
+		},
+	}
+	for _, testCase := range cases {
+		if _, ok := extractResponseTruncation(testCase.prot, []byte(testCase.body)); ok != testCase.wantOK {
+			t.Fatalf("%s: ok = %v, want %v", testCase.name, ok, testCase.wantOK)
+		}
+	}
+}
+
+func TestStreamIncompleteEventIsSuccessWithTruncation(t *testing.T) {
+	events := []string{
+		`{"type":"response.output_text.delta","delta":"不是一回事","sequence_number":1}`,
+		`{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`,
+	}
+	var sse strings.Builder
+	for _, payload := range events {
+		sse.WriteString("event: x\ndata: " + payload + "\n\n")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sse.String()))
+	}))
+	defer srv.Close()
+
+	cfg := Config{BaseURL: srv.URL, APIKey: "k", Protocol: ProtocolOpenAIResponses, Mode: ModeStream}
+	report, err := CheckModels(context.Background(), cfg, []TaskSpec{{Root: srv.URL, Protocol: ProtocolOpenAIResponses, Model: "gpt-test"}})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	result := report.Results[0].Stream
+	if !result.OK {
+		t.Fatalf("截断不应判为失败, 实际 %#v", result)
+	}
+	if !result.Truncated || result.IncompleteReason != "max_output_tokens" {
+		t.Fatalf("截断标记异常: truncated=%v reason=%q", result.Truncated, result.IncompleteReason)
+	}
+	if result.Preview != "不是一回事" {
+		t.Fatalf("preview 期望原文, 实际 %q", result.Preview)
 	}
 }

@@ -392,6 +392,10 @@ func renderProbe(result checker.ProbeResult) string {
 		return "-"
 	}
 	if result.OK {
+		if result.Truncated {
+			// 模型已正常出字，只是被 max tokens 截断，链路是通的。
+			return "ok(截断) " + millis(result.TotalMS, 0)
+		}
 		return "ok " + millis(result.TotalMS, 0)
 	}
 	if result.HTTPStatus > 0 {

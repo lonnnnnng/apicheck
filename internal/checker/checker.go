@@ -18,13 +18,16 @@ import (
 )
 
 const (
-	defaultProbePrompt          = "Reply with exactly: pong"
-	defaultRequestTimeout       = 60 * time.Second
-	defaultConnectTimeout       = 30 * time.Second
-	defaultStreamFirstWait      = 60 * time.Second
-	defaultStreamIdleTimeout    = 60 * time.Second
-	defaultStreamMaxDuration    = 10 * time.Minute
-	defaultProbeMaxTokens       = 64
+	defaultProbePrompt       = "Reply with exactly: pong"
+	defaultRequestTimeout    = 60 * time.Second
+	defaultConnectTimeout    = 30 * time.Second
+	defaultStreamFirstWait   = 60 * time.Second
+	defaultStreamIdleTimeout = 60 * time.Second
+	defaultStreamMaxDuration = 10 * time.Minute
+	// 探测请求的 max tokens。设为 1 也能测通，但真实网关配合长系统提示词时
+	// 模型往往写到一半就到上限，回一个"截断"事件，容易让人误判成不可用。
+	// 256 足够输出一句完整回答，成本仍然极低。
+	defaultProbeMaxTokens       = 256
 	nonStreamResponseLimitBytes = 2 << 20 // 非流式响应体读取上限，超出部分丢弃并标记截断。
 	streamRawLimitBytes         = 2 << 20 // 流式原始响应累积上限。
 	streamTextLimitBytes        = 1 << 20 // 流式文本预览累积上限。
@@ -541,7 +544,38 @@ func readNonStreamResult(resp *http.Response, protocol Protocol, start time.Time
 		result.Preview = result.RawResponse
 	}
 	result.TokenUsage = extractTokenUsage(protocol, body, false)
+	if reason, truncated := extractResponseTruncation(protocol, body); truncated {
+		result.Truncated = true
+		result.IncompleteReason = reason
+	}
 	result.OK = true
+}
+
+// extractResponseTruncation 识别非流式响应里的"被 max tokens 截断"标记。
+func extractResponseTruncation(protocol Protocol, body []byte) (string, bool) {
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return "", false
+	}
+	switch protocol {
+	case ProtocolOpenAIResponses:
+		if stringField(payload, "status") == "incomplete" {
+			details, _ := payload["incomplete_details"].(map[string]any)
+			return firstNonEmptyString(stringField(details, "reason"), "incomplete"), true
+		}
+	case ProtocolAnthropicMessages:
+		if stringField(payload, "stop_reason") == "max_tokens" {
+			return "max_tokens", true
+		}
+	case ProtocolOpenAIChat:
+		for _, choice := range asSlice(payload["choices"]) {
+			item, _ := choice.(map[string]any)
+			if stringField(item, "finish_reason") == "length" {
+				return "max_tokens", true
+			}
+		}
+	}
+	return "", false
 }
 
 type streamReadItem struct {
@@ -563,6 +597,10 @@ type streamCapture struct {
 	errSeen bool
 	errCode string
 	errMsg  string
+	// 上游明确告知"被 max_output_tokens 截断"（responses 的 response.incomplete /
+	// anthropic 的 stop_reason=max_tokens）。这类响应链路是通的，不算失败。
+	truncSeen   bool
+	truncReason string
 }
 
 func (c *streamCapture) recordEventError(code, message string) {
@@ -580,6 +618,17 @@ func (c *streamCapture) recordEventError(code, message string) {
 
 func (c *streamCapture) eventError() (string, string, bool) {
 	return c.errCode, c.errMsg, c.errSeen
+}
+
+func (c *streamCapture) recordTruncation(reason string) {
+	c.truncSeen = true
+	if reason != "" {
+		c.truncReason = reason
+	}
+}
+
+func (c *streamCapture) truncation() (string, bool) {
+	return c.truncReason, c.truncSeen
 }
 
 func (c *streamCapture) writeRawLine(line string) {
@@ -795,6 +844,10 @@ func finalizeStreamResult(resp *http.Response, task modelTask, start time.Time, 
 		// 真正的 SSE 原始数据只留在 raw_response 里，避免整段事件流灌进预览区。
 		result.Preview = result.RawResponse
 	}
+	if reason, truncated := capture.truncation(); truncated {
+		result.Truncated = true
+		result.IncompleteReason = reason
+	}
 	result.OK = true
 }
 
@@ -867,6 +920,9 @@ func handleSSEEvent(task modelTask, start time.Time, capture *streamCapture, eve
 	}
 	if code, message, failed := extractStreamEventError([]byte(data)); failed {
 		capture.recordEventError(code, message)
+	}
+	if reason, truncated := extractStreamTruncation(task.protocol, []byte(data)); truncated {
+		capture.recordTruncation(reason)
 	}
 }
 
@@ -1160,16 +1216,44 @@ func extractStreamEventError(body []byte) (string, string, bool) {
 			return code, message, true
 		}
 		return "", "", false
+	}
+	return "", "", false
+}
+
+// extractStreamTruncation 识别"输出被 max tokens 截断"的事件。
+// 这种响应模型已经正常出字，说明链路是通的，不能按失败处理。
+func extractStreamTruncation(protocol Protocol, body []byte) (string, bool) {
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return "", false
+	}
+	switch stringField(payload, "type") {
 	case "response.incomplete":
 		response, _ := payload["response"].(map[string]any)
 		details, _ := response["incomplete_details"].(map[string]any)
-		reason := stringField(details, "reason")
-		if reason == "" {
-			return "", "", false
+		reason := firstNonEmptyString(stringField(details, "reason"), "incomplete")
+		return reason, true
+	case "response.completed":
+		// 少数网关把截断信息挂在 completed 事件上。
+		response, _ := payload["response"].(map[string]any)
+		details, _ := response["incomplete_details"].(map[string]any)
+		if reason := stringField(details, "reason"); reason != "" {
+			return reason, true
 		}
-		return "incomplete", "响应不完整：" + reason, true
+	case "message_delta":
+		if protocol != ProtocolAnthropicMessages {
+			return "", false
+		}
+		delta, _ := payload["delta"].(map[string]any)
+		if stringField(delta, "stop_reason") == "max_tokens" {
+			return "max_tokens", true
+		}
+	case "message_stop":
+		if protocol != ProtocolAnthropicMessages {
+			return "", false
+		}
 	}
-	return "", "", false
+	return "", false
 }
 
 func errorObjectFields(value any) (string, string, bool) {
