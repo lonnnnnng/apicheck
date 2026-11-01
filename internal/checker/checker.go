@@ -850,8 +850,12 @@ func handleSSEEvent(task modelTask, start time.Time, capture *streamCapture, eve
 		return
 	}
 	if text := extractConversationText(task.protocol, []byte(data)); text != "" {
-		capture.writeText(text)
-		emitProgress(progress, task, "delta", text, data)
+		// responses 协议的 *.done 事件会把已经流式下发过的文本再完整带一遍，
+		// 直接追加会出现 "pong"+"pong"="pongpong"，这里对已完成事件做去重。
+		if !streamTextAlreadyCaptured(task.protocol, capture, []byte(data), text) {
+			capture.writeText(text)
+			emitProgress(progress, task, "delta", text, data)
+		}
 	}
 	if result.FirstTextMS == 0 && eventHasText(task.protocol, []byte(data)) {
 		result.FirstTextMS = elapsedMS(start)
@@ -864,6 +868,24 @@ func handleSSEEvent(task modelTask, start time.Time, capture *streamCapture, eve
 	if code, message, failed := extractStreamEventError([]byte(data)); failed {
 		capture.recordEventError(code, message)
 	}
+}
+
+// streamTextAlreadyCaptured 判断本次事件携带的文本是否已经通过增量事件写入过。
+// 只对 responses 协议的收尾事件（*.done / response.completed）做判断，
+// 其它协议与增量事件原样返回 false，保持既有行为。
+func streamTextAlreadyCaptured(protocol Protocol, capture *streamCapture, body []byte, text string) bool {
+	if protocol != ProtocolOpenAIResponses || capture == nil || text == "" {
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	if !strings.HasSuffix(stringField(payload, "type"), ".done") && stringField(payload, "type") != "response.completed" {
+		return false
+	}
+	captured := capture.text.String()
+	return captured != "" && strings.Contains(captured, text)
 }
 
 func emitProgress(progress func(ProgressEvent), task modelTask, kind, text, raw string) {

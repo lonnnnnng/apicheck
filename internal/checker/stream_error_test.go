@@ -227,3 +227,38 @@ func TestStreamWithoutTextKeepsRawPreviewForJSONBody(t *testing.T) {
 		t.Fatalf("preview = %q, want raw JSON body", stream.Preview)
 	}
 }
+
+func TestStreamResponseDoneEventsDoNotDuplicateText(t *testing.T) {
+	events := []string{
+		`{"type":"response.output_text.delta","delta":"pong","sequence_number":3}`,
+		`{"type":"response.output_text.done","text":"pong","sequence_number":4}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[{"content":[{"type":"output_text","text":"pong"}]}],"usage":{"input_tokens":11,"output_tokens":5}}}`,
+	}
+	var sse strings.Builder
+	for i, payload := range events {
+		sse.WriteString("event: x\ndata: " + payload + "\n\n")
+		_ = i
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sse.String()))
+	}))
+	defer srv.Close()
+
+	cfg := Config{BaseURL: srv.URL, APIKey: "k", Protocol: ProtocolOpenAIResponses, Mode: ModeStream}
+	report, err := CheckModels(context.Background(), cfg, []TaskSpec{{Root: srv.URL, Protocol: ProtocolOpenAIResponses, Model: "gpt-test"}})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	result := report.Results[0].Stream
+	if !result.OK {
+		t.Fatalf("期望成功, 实际 %#v", result)
+	}
+	if result.Preview != "pong" {
+		t.Fatalf("preview 期望 pong, 实际 %q", result.Preview)
+	}
+	if result.TokenUsage.Input != 11 || result.TokenUsage.Output != 5 {
+		t.Fatalf("token 用量异常: %#v", result.TokenUsage)
+	}
+}
