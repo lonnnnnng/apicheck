@@ -104,20 +104,6 @@ func drawRoundedRect(img *image.NRGBA, x, y, w, h, r float64, stops []gradientSt
 	}
 }
 
-func drawQuadratic(img *image.NRGBA, a, b, c point, width float64, col color.NRGBA) {
-	prev := a
-	for i := 1; i <= 48; i++ {
-		t := float64(i) / 48
-		mt := 1 - t
-		next := point{
-			x: mt*mt*a.x + 2*mt*t*b.x + t*t*c.x,
-			y: mt*mt*a.y + 2*mt*t*b.y + t*t*c.y,
-		}
-		drawThickLine(img, prev, next, width, col)
-		prev = next
-	}
-}
-
 func drawThickLine(img *image.NRGBA, a, b point, width float64, col color.NRGBA) {
 	radius := width / 2
 	minX := maxInt(0, int(math.Floor(math.Min(a.x, b.x)-radius-1)))

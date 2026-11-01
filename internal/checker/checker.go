@@ -181,17 +181,6 @@ func applyProxy(transport *http.Transport, raw string) {
 	}
 }
 
-func probeModelSources(ctx context.Context, client *http.Client, cfg Config, root string) []ModelSource {
-	var sources []ModelSource
-	if shouldProbeOpenAIModels(cfg.Protocol) {
-		sources = append(sources, listModels(ctx, client, cfg, root, "openai"))
-	}
-	if shouldProbeAnthropicModels(cfg.Protocol) {
-		sources = append(sources, listModels(ctx, client, cfg, root, "anthropic"))
-	}
-	return sources
-}
-
 // probeAllModelSources 并行探测所有 root×authStyle 组合（最多 4 个并发），
 // 但按 root 顺序、每个 root 内 openai 在 anthropic 之前的固定次序输出，保证多次执行结果稳定可对比。
 func probeAllModelSources(ctx context.Context, client *http.Client, cfg Config, roots []string) []ModelSource {
