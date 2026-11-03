@@ -256,6 +256,26 @@ try {
   const restored = await page.evaluate(() => ({ rows: data.length, non: document.querySelector('#rows tr[data-index]')?.children[1].innerText.trim() || '' }));
   check('刷新后结果仍可见', restored.rows === 2 && restored.non.length > 0, JSON.stringify(restored));
 
+  console.log('多协议检测…');
+  await page.click('#checkAllBtn');
+  await page.waitForTimeout(250);
+  check('默认只勾选一个协议', (await page.evaluate(() => readCheckedProtocols())).length === 1);
+  await page.evaluate(() => {
+    checkProtocolInputs.forEach((input) => (input.checked = true));
+    syncDialogOptions(true);
+  });
+  const multi = await page.evaluate(() => ({ tasks: checkDialogTasks.length, protocols: [...new Set(checkDialogTasks.map((task) => task.protocol))] }));
+  check('勾选三个协议后请求数 ×3', multi.tasks === 6 && multi.protocols.length === 3, JSON.stringify(multi));
+  const refused = await page.evaluate(() => {
+    checkProtocolInputs.forEach((input, index) => (input.checked = index === 2));
+    checkProtocolInputs[2].checked = false;
+    checkProtocolInputs[2].dispatchEvent(new Event('change', { bubbles: true }));
+    return readCheckedProtocols();
+  });
+  check('不允许取消到 0 个协议', refused.length === 1, JSON.stringify(refused));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+
   console.log('检查弹窗…');
   await page.click('#settingsBtn');
   await page.waitForTimeout(250);
