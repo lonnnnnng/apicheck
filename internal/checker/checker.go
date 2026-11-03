@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -345,6 +346,7 @@ func normalizeTaskSpecs(tasks []TaskSpec) []TaskSpec {
 }
 
 func runTasks(ctx context.Context, cfg Config, tasks []TaskSpec) []ModelResult {
+	onResult := cfg.OnResult
 	nonStreamClient := newHTTPClient(cfg, cfg.Timeout, 0)
 	streamClient := newHTTPClient(cfg, 0, cfg.StreamFirstTimeout)
 	jobs := make(chan modelTask)
@@ -406,6 +408,9 @@ func runTasks(ctx context.Context, cfg Config, tasks []TaskSpec) []ModelResult {
 	out := make([]ModelResult, 0, len(tasks))
 	for result := range results {
 		out = append(out, result)
+		if onResult != nil {
+			onResult(result)
+		}
 	}
 	// 按完成序收结果会让同一批次的行序随机波动，排序后保证多次执行可对比。
 	sort.Slice(out, func(i, j int) bool {
@@ -641,6 +646,7 @@ func readNonStreamResult(resp *http.Response, protocol Protocol, start time.Time
 		result.ErrorMessage = sanitizeErrorMessage(extractErrorMessage(body))
 		result.Preview = result.ErrorMessage
 		result.RawError = result.RawResponse
+		result.RetryAfterMS = retryAfterDelay(resp.Header, body)
 		return
 	}
 	if text := extractConversationText(protocol, body); text != "" {
@@ -927,6 +933,7 @@ func finalizeStreamResult(resp *http.Response, task modelTask, start time.Time, 
 		result.ErrorMessage = sanitizeErrorMessage(extractErrorMessage(rawBody))
 		result.Preview = result.ErrorMessage
 		result.RawError = result.RawResponse
+		result.RetryAfterMS = retryAfterDelay(resp.Header, rawBody)
 		return
 	}
 	// HTTP 200 + response.failed（或 anthropic error 事件）属于失败：
@@ -1577,6 +1584,14 @@ func runTaskWithRetry(ctx context.Context, nonStreamClient, streamClient *http.C
 		if backoff > 8*time.Second {
 			backoff = 8 * time.Second
 		}
+		// 上游明确要求等多久时以它为准（很多网关会回 Retry-After 或
+		// retryAfterSeconds），上限 30s 防止异常值把检测挂死。
+		if suggested := retryAfterDelayOf(last); suggested > backoff {
+			backoff = suggested
+			if backoff > maxRetryBackoff {
+				backoff = maxRetryBackoff
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return last, throttled
@@ -1599,6 +1614,66 @@ func resultNeedsRetry(result ModelResult) bool {
 		return probe.HTTPStatus >= 500
 	}
 	return retryable(result.NonStream) || retryable(result.Stream)
+}
+
+// maxRetryBackoff 是上游建议等待时长与指数退避的上限，避免异常值把检测挂死。
+const maxRetryBackoff = 30 * time.Second
+
+// retryAfterDelayOf 取一次模型探测里上游建议的最长等待时间。
+func retryAfterDelayOf(result ModelResult) time.Duration {
+	longest := result.NonStream.RetryAfterMS
+	if result.Stream.RetryAfterMS > longest {
+		longest = result.Stream.RetryAfterMS
+	}
+	if longest <= 0 {
+		return 0
+	}
+	return time.Duration(longest) * time.Millisecond
+}
+
+// retryAfterDelay 从响应头 Retry-After（秒数或 HTTP 日期）和响应体里的
+// retryAfterSeconds / retry_after 中解析上游建议的等待时长，单位毫秒。
+// 解析不出来时返回 0，调用方继续用指数退避。
+func retryAfterDelay(header http.Header, body []byte) int64 {
+	if header != nil {
+		if value := strings.TrimSpace(header.Get("Retry-After")); value != "" {
+			if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds > 0 {
+				return int64(seconds * 1000)
+			}
+			if when, err := http.ParseTime(value); err == nil {
+				if wait := time.Until(when); wait > 0 {
+					return wait.Milliseconds()
+				}
+			}
+		}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 0
+	}
+	for _, key := range []string{"retryAfterSeconds", "retry_after_seconds", "retry_after"} {
+		if value, ok := payload[key]; ok {
+			if ms := secondsValueToMS(value); ms > 0 {
+				return ms
+			}
+		}
+	}
+	return 0
+}
+
+// secondsValueToMS 把 JSON 里的秒数（可能是数字也可能是字符串）转成毫秒。
+func secondsValueToMS(value any) int64 {
+	switch typed := value.(type) {
+	case float64:
+		if typed > 0 {
+			return int64(typed * 1000)
+		}
+	case string:
+		if seconds, err := strconv.ParseFloat(strings.TrimSpace(typed), 64); err == nil && seconds > 0 {
+			return int64(seconds * 1000)
+		}
+	}
+	return 0
 }
 
 // hasErrorClass 判断一次探测结果里是否出现了指定错误类别。

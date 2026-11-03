@@ -18,6 +18,9 @@ API Checker 是一个用于检测 OpenAI / Anthropic 兼容接口的本地工具
 - API Key 默认只显示脱敏尾号，点「显示」才切换明文，避免截屏或共享屏幕时泄露。
 - 支持请求预览，包含 `curl` 和 POST 原始请求。
 - 支持查看返回正文和完整原始返回，便于排查兼容网关问题。
+- 批量检测逐条回传结果：每测完一个模型，表格立刻出现该行，检测弹窗实时显示「已测 N/M」，不再等整批跑完。
+- 检测结果会缓存在本地，重开窗口即可看到上次结论；支持一键导出 CSV / JSON，报告可以贴进表格或工单。
+- 失败原因以中文标签直接显示（限流、鉴权失败、端点不存在…），鼠标悬停可看原始 `error_class` 与错误详情。
 - 选择 agent 预设时自动附带该 agent 的真实客户端请求头（pi、codex、opencode），请求头与系统提示词配套切换。
 
 ## 图标设计
@@ -44,12 +47,17 @@ assets/app-icon.svg
 ├── docs/
 │   └── api-checker-technical-design.md
 ├── internal/
-│   └── checker/                    # 核心检测逻辑
+│   ├── apireq/                     # Web / 桌面 / CLI 共用的请求结构与参数解析
+│   ├── checker/                    # 核心检测逻辑
+│   ├── presentation/               # Markdown 清洗与二维码生成
+│   └── version/                    # 唯一版本号来源
 ├── prototype/
 │   └── index.html                  # 原型和桌面 UI 源文件
 └── scripts/
     ├── build-desktop.sh            # 同步前端并构建桌面二进制
-    └── sync-desktop-ui.sh          # 同步 prototype 到 Wails embed 目录
+    ├── package-macos.sh            # 打 .app / .dmg / .zip
+    ├── sync-desktop-ui.sh          # 同步 prototype 到 Wails embed 目录
+    └── ui-smoke.mjs                # 前端冒烟测试
 ```
 
 ## 桌面应用
@@ -153,7 +161,7 @@ go run ./cmd/apicheck --base-url "https://example.com/v1" --api-key "sk-xxx"   -
 
 ## 限流与模型数量
 
-`--retries` 在限流（429）、5xx 和网络类错误上重试，退避 1s 起、上限 8s；认证失败与请求格式错误不重试。
+`--retries` 在限流（429）、5xx 和网络类错误上重试，退避 1s 起、上限 8s；认证失败与请求格式错误不重试。如果上游在响应里给出建议等待时长（`Retry-After` 响应头，或响应体的 `retryAfterSeconds` / `retry_after`），重试会以它为准，上限 30s，不会在网关要求的窗口内继续撞限流。
 
 `--adaptive-concurrency` 打开后，一旦某次探测撞上限流就把并发窗口减半，之后每完成一个任务缓慢加回，避免越试越限。
 
@@ -176,6 +184,14 @@ APICHECK_API_KEY="sk-xxx" go run ./cmd/apicheck --base-url "https://example.com/
 ```
 
 表格里的 TOKENS 列格式为 `输入/输出/缓存/总计`（数据来自响应的 `usage` 字段，OpenAI 与 Anthropic 的命名已归一；网关未返回 usage 时显示 `-`）。Web UI 的模型表格与检测弹窗同样展示。
+
+查看版本：
+
+```bash
+go run ./cmd/apicheck --version
+```
+
+版本号只在 `internal/version/version.go` 里维护一处，打包脚本与 `--version` 都读它。
 
 输出 JSON：
 
@@ -250,6 +266,22 @@ Anthropic 兼容对话：
 go test ./...
 ```
 
+代码风格 / 静态检查：
+
+```bash
+gofmt -l .
+go vet ./...
+staticcheck ./...
+```
+
+前端冒烟测试（headless 跑通「获取模型 → 全部检测 → 导出 CSV → 刷新恢复」几条关键链路）：
+
+```bash
+npm install --no-save playwright-core
+npx playwright install chromium
+node scripts/ui-smoke.mjs
+```
+
 检查桌面构建：
 
 ```bash
@@ -257,3 +289,5 @@ go test ./...
 ```
 
 如果只修改 UI，请改 `prototype/index.html`，再执行构建脚本同步到桌面端。
+
+CI 配置在 `.github/workflows/ci.yml`：`go` 任务跑 gofmt / vet / test / build / staticcheck，`ui-smoke` 任务跑上面的冒烟脚本，改 UI 或改后端都会自动过一遍。

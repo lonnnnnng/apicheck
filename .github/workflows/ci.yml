@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "${unformatted}" ]; then
+            echo "以下文件未通过 gofmt:"; echo "${unformatted}"; exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./...
+      - name: build
+        run: |
+          go build ./...
+          # 作者 long: 桌面端需要 desktop,production tag 才能编过生产依赖，单独编一次。
+          go build -tags desktop,production -o /dev/null ./cmd/apicheck-desktop
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          "$(go env GOPATH)/bin/staticcheck" ./...
+
+  ui-smoke:
+    runs-on: ubuntu-latest
+    needs: go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install playwright
+        run: |
+          npm install --no-save playwright-core@1.49.1
+          npx --yes playwright@1.49.1 install --with-deps chromium
+      - name: ui smoke
+        run: node scripts/ui-smoke.mjs

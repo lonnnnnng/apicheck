@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"apicheck/internal/apireq"
@@ -46,6 +47,11 @@ func (a *App) CheckModels(req CheckRequest) (*checker.Report, error) {
 		cfg.Progress = func(event checker.ProgressEvent) {
 			runtime.EventsEmit(a.ctx, eventName, event)
 		}
+		// 作者 long: 每个模型测完立刻推一条结果，前端边收边渲染，
+		// 大批量检测时不再长时间空白。
+		cfg.OnResult = func(result checker.ModelResult) {
+			runtime.EventsEmit(a.ctx, eventName+":result", result)
+		}
 	}
 	return checker.CheckModels(context.Background(), cfg, req.Tasks)
 }
@@ -84,6 +90,29 @@ func (a *App) RenderMarkdown(text string) (string, error) {
 func (a *App) GenerateQRCode(text string) (string, error) {
 	// 作者 long: 连接分享包含 API Key，二维码必须完全在本地生成，不能调用外部图片或二维码服务。
 	return presentation.GenerateQRCodeDataURL(text)
+}
+
+// SaveTextFile 让用户选一个位置把导出内容写到磁盘。
+// 作者 long: WKWebView 里 a[download] + blob 不可靠，桌面端的导出必须走原生保存对话框。
+// 返回空字符串表示用户取消了保存。
+func (a *App) SaveTextFile(filename, content string) (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("应用尚未就绪")
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "导出检测结果",
+		DefaultFilename: filename,
+	})
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", nil
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func (a *App) Quit() {

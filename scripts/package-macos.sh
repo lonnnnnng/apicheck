@@ -3,7 +3,9 @@ set -euo pipefail
 
 root_dir="${0:A:h:h}"
 app_name="API Checker"
-app_version="1.6.11"
+# 作者 long: 版本号只在 internal/version 里维护一处，打包脚本直接读它，
+# 避免 app 包版本和 CLI --version 报的版本不一致。
+app_version="$(cd "${root_dir}" && go run ./internal/version/cmd/printver)"
 bundle_id="local.apicheck.desktop"
 build_dir="${root_dir}/build/macos"
 stage_dir="${build_dir}/stage"

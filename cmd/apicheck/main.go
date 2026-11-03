@@ -14,6 +14,7 @@ import (
 	"apicheck/internal/apireq"
 	"apicheck/internal/checker"
 	"apicheck/internal/presentation"
+	"apicheck/internal/version"
 )
 
 func main() {
@@ -25,6 +26,8 @@ func main() {
 	var staticDir string
 	var streamMaxDuration string
 	var strict bool
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.StringVar(&cfg.BaseURL, "base-url", "", "API root URL, for example https://example.com/v1")
 	flag.StringVar(&cfg.APIKey, "api-key", "", "API key, can also be provided by APICHECK_API_KEY")
 	flag.Var((*protocolFlag)(&cfg.Protocol), "protocol", "auto/openai/openai-chat/openai-responses/anthropic/anthropic-messages/all")
@@ -55,6 +58,10 @@ func main() {
 	flag.StringVar(&listen, "listen", "127.0.0.1:8787", "web UI listen address")
 	flag.StringVar(&staticDir, "static-dir", "prototype", "directory that contains index.html")
 	flag.Parse()
+	if showVersion {
+		fmt.Println(version.Version)
+		return
+	}
 	cfg.StreamMaxDuration, cfg.DisableStreamMax = apireq.ParseStreamMaxDuration(streamMaxDuration, 10*time.Minute)
 
 	if serve {
@@ -134,6 +141,52 @@ func newServerHandler(staticDir string) http.Handler {
 		report, err := checker.ListModels(r.Context(), apireq.ConfigFrom(req, checker.ClientSurfaceCLI))
 		writeJSONReport(w, report, err)
 	})
+	// 作者 long: 批量检测动辄上百个模型，一次性返回会让前端长时间没有任何反馈。
+	// 这里用 SSE 把每个模型的结果立刻推回去，前端边收边渲染。
+	mux.HandleFunc("/api/check/stream", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		var req apireq.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		writeEvent := func(name string, payload any) {
+			data, err := json.Marshal(payload)
+			if err != nil {
+				return
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data)
+			flusher.Flush()
+		}
+		cfg := apireq.ConfigFrom(req, checker.ClientSurfaceCLI)
+		cfg.OnResult = func(result checker.ModelResult) { writeEvent("result", result) }
+		var report *checker.Report
+		var err error
+		if len(req.Tasks) > 0 {
+			report, err = checker.CheckModels(r.Context(), cfg, req.Tasks)
+		} else {
+			report, err = checker.Run(r.Context(), cfg)
+		}
+		if err != nil {
+			writeEvent("error", map[string]string{"error": err.Error()})
+			return
+		}
+		writeEvent("done", report)
+	})
+
 	mux.HandleFunc("/api/check", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

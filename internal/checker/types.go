@@ -75,6 +75,9 @@ type Config struct {
 	OpenAIClientSurface    ClientSurface
 	AnthropicClientSurface ClientSurface
 	Progress               func(ProgressEvent)
+	// OnResult 在每个模型探测完成时回调（按完成顺序，不保证有序），
+	// 供 Web / 桌面端把结果增量推给前端，避免大批量检测时长时间无反馈。
+	OnResult func(ModelResult)
 }
 
 type ProgressEvent struct {
@@ -128,6 +131,10 @@ type ProbeResult struct {
 	RawError     string `json:"raw_error,omitempty"`
 	// TokenUsage 是从响应 usage 字段提取的 token 用量；网关未返回时为零值，前端不展示。
 	TokenUsage TokenUsage `json:"token_usage,omitempty"`
+	// RetryAfterMS 是上游在限流/过载响应里给出的建议等待时长（毫秒）。
+	// 来源是 Retry-After 响应头或响应体里的 retryAfterSeconds/retry_after；
+	// 重试退避会与指数退避取较大值，避免在网关要求的窗口内继续撞限流。
+	RetryAfterMS int64 `json:"retry_after_ms,omitempty"`
 	// Truncated 表示上游明确告知"响应被 max_output_tokens 截断"（responses 的
 	// response.incomplete / anthropic 的 stop_reason=max_tokens）。这类响应模型
 	// 已经正常出字，说明链路是通的，不应按失败处理。
