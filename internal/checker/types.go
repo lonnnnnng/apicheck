@@ -29,6 +29,14 @@ const (
 	ClientSurfaceDesktop ClientSurface = "desktop"
 )
 
+// 模型等级（推理强度）取值；与 OpenAI 的 reasoning_effort 枚举一致。
+const (
+	ReasoningEffortMinimal = "minimal"
+	ReasoningEffortLow     = "low"
+	ReasoningEffortMedium  = "medium"
+	ReasoningEffortHigh    = "high"
+)
+
 type Config struct {
 	BaseURL string
 	APIKey  string
@@ -37,6 +45,11 @@ type Config struct {
 	SystemPromptPresetID string
 	// MaxTokens 是探测请求的 max_output_tokens / max_tokens 上限；<=0 用 defaultProbeMaxTokens。
 	MaxTokens int
+	// ReasoningEffort 是"模型等级"（推理强度），空或 "none" 表示不发送。
+	// 合法值：minimal / low / medium / high。三个协议的字段名不同：
+	// openai-chat 用 reasoning_effort，openai-responses 用 reasoning.effort，
+	// anthropic-messages 用 output_config.effort（Anthropic 只认 low/medium/high，minimal 会降级成 low）。
+	ReasoningEffort string
 	// Proxy 是出口代理，支持 http/https/socks5；空表示直连。
 	Proxy string
 	// CustomHeaders 是用户追加的自定义请求头，每行一条 "Name: Value"。

@@ -134,6 +134,7 @@ func withDefaults(cfg Config) Config {
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = defaultProbeMaxTokens
 	}
+	cfg.ReasoningEffort = normalizeReasoningEffort(cfg.ReasoningEffort)
 	cfg.ClientSurface = normalizeClientSurface(cfg.ClientSurface, ClientSurfaceCLI)
 	cfg.OpenAIClientSurface = normalizeClientSurface(cfg.OpenAIClientSurface, cfg.ClientSurface)
 	cfg.AnthropicClientSurface = normalizeClientSurface(cfg.AnthropicClientSurface, cfg.ClientSurface)
@@ -504,6 +505,42 @@ func probePromptCacheKey(model string) string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// normalizeReasoningEffort 把用户输入归一化成合法等级；无法识别时返回空（不发送字段）。
+func normalizeReasoningEffort(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case ReasoningEffortMinimal:
+		return ReasoningEffortMinimal
+	case ReasoningEffortLow:
+		return ReasoningEffortLow
+	case ReasoningEffortMedium:
+		return ReasoningEffortMedium
+	case ReasoningEffortHigh:
+		return ReasoningEffortHigh
+	default:
+		return ""
+	}
+}
+
+// applyReasoningEffort 按协议把"模型等级"写进请求体。
+// 各协议字段名不同，且 anthropic 不认 minimal，这里统一降级成 low，避免网关 400。
+func applyReasoningEffort(body map[string]any, protocol Protocol, effort string) {
+	effort = normalizeReasoningEffort(effort)
+	if effort == "" {
+		return
+	}
+	switch protocol {
+	case ProtocolOpenAIChat:
+		body["reasoning_effort"] = effort
+	case ProtocolOpenAIResponses:
+		body["reasoning"] = map[string]any{"effort": effort}
+	case ProtocolAnthropicMessages:
+		if effort == ReasoningEffortMinimal {
+			effort = ReasoningEffortLow
+		}
+		body["output_config"] = map[string]any{"effort": effort}
+	}
+}
+
 func conversationBody(protocol Protocol, model string, stream bool, prompt string) ([]byte, error) {
 	return conversationBodyWithOptions(protocol, model, stream, prompt, "", 0)
 }
@@ -513,11 +550,20 @@ func conversationBodyWithSystem(protocol Protocol, model string, stream bool, pr
 	return conversationBodyWithOptions(protocol, model, stream, prompt, systemPrompt, 0)
 }
 
+// conversationBodyWithEffort 在探测请求体中加入"模型等级"。
+func conversationBodyWithEffort(protocol Protocol, model string, stream bool, prompt string, systemPrompt string, maxTokens int, effort string) ([]byte, error) {
+	return buildConversationBody(protocol, model, stream, prompt, systemPrompt, maxTokens, effort)
+}
+
 // conversationBodyWithOptions 是探测请求体的唯一构造入口。
 // 三个协议的 system 角色字段名不同（messages[0] / instructions / system），
 // 但语义一致：模拟真实 agent 的系统提示词流量。
 // maxTokens <=0 时回退 defaultProbeMaxTokens；maxTokensLimit 由调用方（cfg 已归一化）保证合法。
 func conversationBodyWithOptions(protocol Protocol, model string, stream bool, prompt string, systemPrompt string, maxTokens int) ([]byte, error) {
+	return buildConversationBody(protocol, model, stream, prompt, systemPrompt, maxTokens, "")
+}
+
+func buildConversationBody(protocol Protocol, model string, stream bool, prompt string, systemPrompt string, maxTokens int, effort string) ([]byte, error) {
 	if maxTokens <= 0 {
 		maxTokens = defaultProbeMaxTokens
 	}
@@ -564,6 +610,9 @@ func conversationBodyWithOptions(protocol Protocol, model string, stream bool, p
 		payload = body
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
+	}
+	if body, ok := payload.(map[string]any); ok {
+		applyReasoningEffort(body, protocol, effort)
 	}
 	return json.Marshal(payload)
 }

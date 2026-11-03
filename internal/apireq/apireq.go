@@ -25,6 +25,7 @@ type Request struct {
 	Filter               string             `json:"filter"`
 	MaxModels            int                `json:"max_models"`
 	MaxTokens            int                `json:"max_tokens"`
+	ReasoningEffort      string             `json:"reasoning_effort"`
 	Proxy                string             `json:"proxy"`
 	CustomHeaders        string             `json:"custom_headers"`
 	Retries              int                `json:"retries"`
@@ -74,6 +75,7 @@ func ConfigFrom(req Request, defaultSurface checker.ClientSurface) checker.Confi
 		Filter:                 req.Filter,
 		MaxModels:              req.MaxModels,
 		MaxTokens:              req.MaxTokens,
+		ReasoningEffort:        req.ReasoningEffort,
 		Proxy:                  strings.TrimSpace(req.Proxy),
 		CustomHeaders:          req.CustomHeaders,
 		Retries:                req.Retries,

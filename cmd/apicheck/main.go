@@ -37,6 +37,7 @@ func main() {
 	flag.StringVar(&streamMaxDuration, "stream-max-duration", "10m", "stream max duration, 0 means unlimited")
 	flag.StringVar(&cfg.Prompt, "prompt", "", "conversation probe prompt")
 	flag.IntVar(&cfg.MaxTokens, "max-tokens", 0, "max output tokens for the probe request (default 256)")
+	flag.StringVar(&cfg.ReasoningEffort, "reasoning-effort", "", "模型等级（推理强度）：minimal|low|medium|high，留空不发送")
 	flag.StringVar(&cfg.Proxy, "proxy", "", "outbound proxy, for example http://127.0.0.1:8080 or socks5://127.0.0.1:1080")
 	flag.StringVar(&cfg.CustomHeaders, "header", "", "extra request headers, one 'Name: Value' per line")
 	flag.IntVar(&cfg.Retries, "retries", 0, "extra retries on rate limit / 5xx / network errors")
