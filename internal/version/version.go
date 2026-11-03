@@ -5,4 +5,4 @@
 package version
 
 // Version 是当前发布版本，打包与 --version 都读它。
-const Version = "1.7.1"
+const Version = "1.7.2"

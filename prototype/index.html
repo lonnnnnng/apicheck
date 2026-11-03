@@ -591,6 +591,7 @@ async function showDialogMarkdown(text){
 }
 function resetCheckOutputs(message){
   checkResultMetaEl.textContent='尚未发送';
+  checkResultMetaEl.title='';
   dialogResultMetaEl.textContent='等待发送';
   rawResultMetaEl.textContent='等待发送';
   showDialogPlain(message);
@@ -674,7 +675,10 @@ function usageSummaryText(results,kind){
     input+=usage.input||0;output+=usage.output||0;cached+=usage.cached||0;total+=usage.total||0;
   });
   if(!seen)return '';
-  return `输入 ${input} / 输出 ${output} / 缓存 ${cached} / 总计 ${total}`;
+  // 作者 long: 这里以前写成“输入 1646 / 输出 243 / 缓存 0 / 总计 1889”，
+  // 放在发送按钮左边只有 340px 宽，实测被截断到看不见“总计”，
+  // 改成和 CLI 的 TOKENS 列一致的紧凑写法，完整含义放到 title 里。
+  return `${input}/${output}/${cached}/${total}`;
 }
 function resultTextForReport(report,kind){
   const results=report.results||[];
@@ -702,7 +706,12 @@ async function setCheckResultReport(report){
   checkStatusEl.textContent=['检测完成',accountCount>1?`${accountCount} 个账号`:'',`可用 ${okCount}/${results.length}`,failedCount?`失败 ${failedCount}`:'',truncatedCount?`截断 ${truncatedCount}`:''].filter(Boolean).join(' · ');
   checkResultMetaEl.textContent=`${report.duration_ms||0}ms`;
   const usageSummary=usageSummaryText(results,checkDialogMode);
-  if(usageSummary)checkResultMetaEl.textContent+=` · tokens ${usageSummary}`;
+  if(usageSummary){
+    checkResultMetaEl.textContent+=` · tokens ${usageSummary}`;
+    checkResultMetaEl.title=`本次检测合计 tokens（输入/输出/缓存/总计）：${usageSummary}`;
+  }else{
+    checkResultMetaEl.title='';
+  }
   const tested=results.some(result=>(checkDialogMode==='stream'?result.stream:result.nonstream)?.tested);
   dialogResultMetaEl.textContent=tested?'已返回':'本次未执行';
   rawResultMetaEl.textContent=`${report.duration_ms||0}ms`;
@@ -771,6 +780,7 @@ function appendLiveStream(event){
 function setCheckResultPending(message){
   checkStatusEl.textContent=message;
   checkResultMetaEl.textContent='请求中';
+  checkResultMetaEl.title='';
   dialogResultMetaEl.textContent=`${modeLabel()}请求中`;
   rawResultMetaEl.textContent='请求中';
   showDialogPlain(checkDialogMode==='stream'?'':message);
@@ -779,6 +789,7 @@ function setCheckResultPending(message){
 function setCheckResultError(error){
   checkStatusEl.textContent='检测失败';
   checkResultMetaEl.textContent='请求失败';
+  checkResultMetaEl.title='';
   dialogResultMetaEl.textContent='请求失败';
   rawResultMetaEl.textContent='请求失败';
   const text=`检测请求失败\n\n${error.message||error}`;
