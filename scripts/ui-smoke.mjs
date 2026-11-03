@@ -165,7 +165,7 @@ await new Promise((resolve, reject) => {
 });
 
 console.log('启动本地服务…');
-const server = spawn(binary, ['-serve', '-listen', `127.0.0.1:${servePort}`, '-static-dir', 'prototype'], {
+const server = spawn(binary, ['-serve', '-listen', `127.0.0.1:${servePort}`, '-static-dir', 'ui'], {
   cwd: rootDir,
   stdio: ['ignore', 'pipe', 'pipe'],
 });

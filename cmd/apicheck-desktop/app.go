@@ -8,7 +8,7 @@ import (
 
 	"apicheck/internal/apireq"
 	"apicheck/internal/checker"
-	"apicheck/internal/presentation"
+	"apicheck/internal/render"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -84,12 +84,12 @@ func (a *App) SystemPrompts() []checker.SystemPromptPreset {
 func (a *App) RenderMarkdown(text string) (string, error) {
 	// 作者 long: 模型返回属于不可信内容，桌面端只接收统一模块清洗后的 HTML，
 	// 避免直接把模型生成的脚本或危险链接注入 WebView。
-	return presentation.RenderMarkdown(text)
+	return render.RenderMarkdown(text)
 }
 
 func (a *App) GenerateQRCode(text string) (string, error) {
 	// 作者 long: 连接分享包含 API Key，二维码必须完全在本地生成，不能调用外部图片或二维码服务。
-	return presentation.GenerateQRCodeDataURL(text)
+	return render.GenerateQRCodeDataURL(text)
 }
 
 // SaveTextFile 让用户选一个位置把导出内容写到磁盘。

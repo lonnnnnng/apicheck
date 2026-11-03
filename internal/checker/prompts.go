@@ -11,7 +11,7 @@ import (
 // 用于模拟“真实 agent 流量”做网关兼容性探测——很多网关会按 system
 // prompt 的特征（长度、语言、结构）路由或限流，只用 "pong" 探不出这些差异。
 //
-//go:embed systemprompt/*.md
+//go:embed prompts/*.md
 var systemPromptFS embed.FS
 
 // SystemPromptPreset 是一份可切换的系统提示词预设。
@@ -53,7 +53,7 @@ func loadPresets() {
 		for _, meta := range presetMeta {
 			preset := SystemPromptPreset{ID: meta.id, Name: meta.name, Description: meta.description}
 			if meta.id != "none" {
-				data, err := systemPromptFS.ReadFile("systemprompt/" + meta.id + ".md")
+				data, err := systemPromptFS.ReadFile("prompts/" + meta.id + ".md")
 				if err != nil {
 					continue
 				}

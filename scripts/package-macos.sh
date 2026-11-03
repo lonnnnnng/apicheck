@@ -5,7 +5,7 @@ root_dir="${0:A:h:h}"
 app_name="API Checker"
 # 作者 long: 版本号只在 internal/version 里维护一处，打包脚本直接读它，
 # 避免 app 包版本和 CLI --version 报的版本不一致。
-app_version="$(cd "${root_dir}" && go run ./internal/version/cmd/printver)"
+app_version="$(cd "${root_dir}" && go run ./cmd/apicheck --version)"
 bundle_id="local.apicheck.desktop"
 build_dir="${root_dir}/build/macos"
 stage_dir="${build_dir}/stage"
@@ -23,7 +23,7 @@ mkdir -p "${app_path}/Contents/MacOS" "${app_path}/Contents/Resources" "${iconse
 
 # 作者 long: Quick Look 会把 SVG 栅格化到白色画布上，Dock 里会出现违和的白方块；
 # 这里用项目内置 Go 生成器直接输出带透明安全区的 PNG，再交给 iconutil 打包成 icns。
-go run "${root_dir}/scripts/icongen" -out "${icon_png}" -size 1024
+go run "${root_dir}/cmd/icongen" -out "${icon_png}" -size 1024
 
 sips -z 16 16 "${icon_png}" --out "${iconset_dir}/icon_16x16.png" >/dev/null
 sips -z 32 32 "${icon_png}" --out "${iconset_dir}/icon_16x16@2x.png" >/dev/null

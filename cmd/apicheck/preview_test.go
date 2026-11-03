@@ -9,7 +9,7 @@ import (
 )
 
 func TestPreviewEndpointModelList(t *testing.T) {
-	handler := newServerHandler("../../prototype")
+	handler := newServerHandler("../../ui")
 	body := `{"base_url":"api.example.com","api_key":"sk-test","kind":"curl"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/preview", strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -29,7 +29,7 @@ func TestPreviewEndpointModelList(t *testing.T) {
 }
 
 func TestPreviewEndpointConversationTask(t *testing.T) {
-	handler := newServerHandler("../../prototype")
+	handler := newServerHandler("../../ui")
 	body := `{"base_url":"https://api.example.com/v1","api_key":"","kind":"post","stream":true,"tasks":[{"root":"https://api.example.com/v1","protocol":"openai-chat","model":"gpt-4o-mini"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/preview", strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -52,7 +52,7 @@ func TestPreviewEndpointConversationTask(t *testing.T) {
 }
 
 func TestAgentIdentityEndpoint(t *testing.T) {
-	handler := newServerHandler("../../prototype")
+	handler := newServerHandler("../../ui")
 	req := httptest.NewRequest(http.MethodPost, "/api/agent-identity", strings.NewReader(`{"system_prompt_preset":"codex"}`))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

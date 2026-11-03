@@ -45,7 +45,7 @@ func TestAPICheckEndpoint(t *testing.T) {
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newServerHandler("../../prototype"))
+	server := httptest.NewServer(newServerHandler("../../ui"))
 	defer server.Close()
 
 	requestBody := []byte(fmt.Sprintf(`{
@@ -116,7 +116,7 @@ func TestAPIModelsThenCheckTasksEndpoint(t *testing.T) {
 	}))
 	defer provider.Close()
 
-	server := httptest.NewServer(newServerHandler("../../prototype"))
+	server := httptest.NewServer(newServerHandler("../../ui"))
 	defer server.Close()
 
 	modelReq := []byte(fmt.Sprintf(`{
@@ -213,7 +213,7 @@ func TestConfigFromRequestHonorsStreamTimeouts(t *testing.T) {
 }
 
 func TestPresentationEndpoints(t *testing.T) {
-	server := httptest.NewServer(newServerHandler("../../prototype"))
+	server := httptest.NewServer(newServerHandler("../../ui"))
 	defer server.Close()
 
 	markdownBody, err := json.Marshal(textRequest{Text: "# 标题\n\n**内容**"})

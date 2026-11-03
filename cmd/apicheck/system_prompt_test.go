@@ -12,7 +12,7 @@ import (
 )
 
 func TestSystemPromptsEndpoint(t *testing.T) {
-	handler := newServerHandler("../../prototype")
+	handler := newServerHandler("../../ui")
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -46,7 +46,7 @@ func TestSystemPromptsEndpoint(t *testing.T) {
 }
 
 func TestPreviewEndpointCarriesSystemPrompt(t *testing.T) {
-	handler := newServerHandler("../../prototype")
+	handler := newServerHandler("../../ui")
 	server := httptest.NewServer(handler)
 	defer server.Close()
 

@@ -42,21 +42,44 @@ assets/app-icon.svg
 ├── assets/                         # 设计资产
 │   └── app-icon.svg                # 应用图标
 ├── cmd/
-│   ├── apicheck/                   # CLI 和本地 HTTP 预览服务入口
-│   └── apicheck-desktop/           # Wails 桌面应用入口
+│   ├── apicheck/                   # CLI 与本地 HTTP 服务
+│   │   ├── main.go                 # 入口与 flag 定义
+│   │   ├── flags.go                # protocol/mode/surface 的 flag.Value 实现
+│   │   ├── serve.go                # -serve 启动
+│   │   ├── server.go               # HTTP 路由与 json 编解码
+│   │   └── table.go                # 终端表格渲染
+│   ├── apicheck-desktop/           # Wails 桌面应用
+│   │   ├── main.go                 # wails.Run 与窗口参数
+│   │   ├── app.go                  # 绑定给前端的 App 方法
+│   │   ├── window_darwin.go        # macOS 圆角透明窗口
+│   │   ├── window_other.go         # 其他平台空实现
+│   │   └── frameworks_darwin.go    # macOS 链接的 framework
+│   └── icongen/                    # 由 SVG 生成应用图标 PNG
 ├── docs/
-│   └── api-checker-technical-design.md
+│   └── technical-design.md
 ├── internal/
 │   ├── apireq/                     # Web / 桌面 / CLI 共用的请求结构与参数解析
 │   ├── checker/                    # 核心检测逻辑
-│   ├── presentation/               # Markdown 清洗与二维码生成
+│   │   ├── checker.go              # 探测编排
+│   │   ├── models.go               # 模型列表发现
+│   │   ├── body.go                 # 请求体构造
+│   │   ├── stream.go               # 流式读取
+│   │   ├── output.go               # token 用量、文本抽取、错误分类
+│   │   ├── retry.go                # 重试与自适应并发
+│   │   ├── requests.go             # Agent 身份头与自定义头
+│   │   ├── identity.go             # 各 Agent 的 User-Agent 事实来源
+│   │   ├── endpoints.go            # Base URL 归一化
+│   │   ├── preview.go              # curl / POST 预览
+│   │   ├── prompts.go              # 系统提示词预设
+│   │   └── prompts/*.md            # 预设正文
+│   ├── render/                     # Markdown 清洗与二维码生成
 │   └── version/                    # 唯一版本号来源
-├── prototype/
-│   └── index.html                  # 原型和桌面 UI 源文件
+├── ui/
+│   └── index.html                  # Web 与桌面共用的 UI 源文件
 └── scripts/
     ├── build-desktop.sh            # 同步前端并构建桌面二进制
     ├── package-macos.sh            # 打 .app / .dmg / .zip
-    ├── sync-desktop-ui.sh          # 同步 prototype 到 Wails embed 目录
+    ├── sync-desktop-ui.sh          # 同步 ui/ 到 Wails embed 目录
     └── ui-smoke.mjs                # 前端冒烟测试
 ```
 
@@ -74,7 +97,7 @@ assets/app-icon.svg
 ./apicheck-desktop
 ```
 
-构建脚本会先把 `prototype/index.html` 同步到 `cmd/apicheck-desktop/frontend/index.html`，再使用 Wails production tags 编译桌面应用。
+构建脚本会先把 `ui/index.html` 同步到 `cmd/apicheck-desktop/frontend/index.html`，再使用 Wails production tags 编译桌面应用。
 
 ## 生成 macOS 安装包
 
@@ -288,6 +311,6 @@ node scripts/ui-smoke.mjs
 ./scripts/build-desktop.sh
 ```
 
-如果只修改 UI，请改 `prototype/index.html`，再执行构建脚本同步到桌面端。
+如果只修改 UI，请改 `ui/index.html`，再执行构建脚本同步到桌面端。
 
 CI 配置在 `.github/workflows/ci.yml`：`go` 任务跑 gofmt / vet / test / build / staticcheck，`ui-smoke` 任务跑上面的冒烟脚本，改 UI 或改后端都会自动过一遍。
