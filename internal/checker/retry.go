@@ -22,6 +22,14 @@ func acquirePermit(permits *atomic.Int64) {
 }
 
 // halvePermits 在遇到限流时收缩并发窗口，下限为 1。
+// initialPermits 是自适应并发的起步窗口：一半并发、向上取整、至少 1。
+func initialPermits(workers int) int64 {
+	if workers < 1 {
+		return 1
+	}
+	return int64((workers + 1) / 2)
+}
+
 func halvePermits(permits *atomic.Int64, ceiling int) {
 	next := permits.Load() / 2
 	if next < 1 {

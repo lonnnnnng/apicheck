@@ -195,7 +195,10 @@ func runTasks(ctx context.Context, cfg Config, tasks []TaskSpec) []ModelResult {
 	var permits atomic.Int64
 	permits.Store(int64(workers))
 	if cfg.AdaptiveConcurrency {
-		permits.Store(1)
+		// 作者 long: 起步先给一半窗口，而不是从 1 开始串行爬坡。
+		// 从 1 起步时，前几个请求总是单跑，整批检测的墙钟时间被拖长一倍；
+		// 一半窗口仍能在真正撞限流时迅速收敛，又能立刻用上并发。
+		permits.Store(initialPermits(workers))
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {

@@ -131,3 +131,13 @@ func TestAdaptiveConcurrencyCompletesAllTasks(t *testing.T) {
 		}
 	}
 }
+
+// 自适应并发起步窗口是一半并发，而不是从 1 串行爬坡。
+func TestInitialPermitsStartsAtHalfWindow(t *testing.T) {
+	cases := map[int]int64{0: 1, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 8: 4, 16: 8}
+	for workers, want := range cases {
+		if got := initialPermits(workers); got != want {
+			t.Fatalf("workers=%d 期望 %d, 实际 %d", workers, want, got)
+		}
+	}
+}
