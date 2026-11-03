@@ -6,6 +6,7 @@ on:
   pull_request:
 
 jobs:
+  # 作者 long: 常规检查跑 ubuntu，快且省额度。
   go:
     runs-on: ubuntu-latest
     steps:
@@ -23,15 +24,24 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test ./...
-      - name: build
-        run: |
-          go build ./...
-          # 作者 long: 桌面端需要 desktop,production tag 才能编过生产依赖，单独编一次。
-          go build -tags desktop,production -o /dev/null ./cmd/apicheck-desktop
+      - name: build cli
+        run: go build ./...
       - name: staticcheck
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest
           "$(go env GOPATH)/bin/staticcheck" ./...
+
+  # 作者 long: Wails 桌面端带 desktop,production tag 编译时需要 gtk3 / webkit2gtk-4.0，
+  # 放在 ubuntu 上会在 pkg-config 直接失败；这个应用本身只发 macOS 包，所以放 macOS 跑。
+  desktop:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build desktop
+        run: go build -tags desktop,production -o /dev/null ./cmd/apicheck-desktop
 
   ui-smoke:
     runs-on: ubuntu-latest
@@ -44,6 +54,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # 作者 long: playwright 版本与脚本里 import 的 playwright-core 保持一致，避免上游升级打挂冒烟。
       - name: install playwright
         run: |
           npm install --no-save playwright-core@1.49.1
